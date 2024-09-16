@@ -1,7 +1,43 @@
 {
   "dependencies": [
     {
-      "name": "@aws-sdk/types",
+      "name": "@aws-sdk/client-cloudformation",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-codebuild",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-ec2",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-ecr",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-imagebuilder",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-lambda",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-secrets-manager",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-sfn",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-sns",
+      "type": "build"
+    },
+    {
+      "name": "@aws-sdk/client-ssm",
       "type": "build"
     },
     {
@@ -40,7 +76,7 @@
     },
     {
       "name": "@types/node",
-      "version": "^16",
+      "version": "^18",
       "type": "build"
     },
     {
@@ -49,17 +85,12 @@
     },
     {
       "name": "@typescript-eslint/eslint-plugin",
-      "version": "^5",
+      "version": "^7",
       "type": "build"
     },
     {
       "name": "@typescript-eslint/parser",
-      "version": "^5",
-      "type": "build"
-    },
-    {
-      "name": "aws-cdk-lib",
-      "version": "2.50.0",
+      "version": "^7",
       "type": "build"
     },
     {
@@ -68,25 +99,17 @@
       "type": "build"
     },
     {
-      "name": "aws-sdk",
-      "type": "build"
-    },
-    {
       "name": "bootstrap",
       "version": "^5.2.0",
       "type": "build"
     },
     {
-      "name": "constructs",
-      "version": "10.0.5",
+      "name": "commit-and-tag-version",
+      "version": "^12",
       "type": "build"
     },
     {
       "name": "esbuild",
-      "type": "build"
-    },
-    {
-      "name": "eslint-import-resolver-node",
       "type": "build"
     },
     {
@@ -122,6 +145,7 @@
     },
     {
       "name": "jsii-docgen",
+      "version": "^10.5.0",
       "type": "build"
     },
     {
@@ -129,13 +153,13 @@
       "type": "build"
     },
     {
-      "name": "jsii",
-      "version": "5.0.x",
+      "name": "jsii-rosetta",
+      "version": "5.3.x",
       "type": "build"
     },
     {
-      "name": "npm-check-updates",
-      "version": "^16",
+      "name": "jsii",
+      "version": "5.3.x",
       "type": "build"
     },
     {
@@ -149,11 +173,6 @@
     },
     {
       "name": "semver",
-      "type": "build"
-    },
-    {
-      "name": "standard-version",
-      "version": "^9",
       "type": "build"
     },
     {
@@ -196,7 +215,7 @@
     },
     {
       "name": "aws-cdk-lib",
-      "version": "^2.50.0",
+      "version": "^2.123.0",
       "type": "peer"
     },
     {

@@ -1,13 +1,16 @@
+import { DescribeImagesCommand, DescribeLaunchTemplateVersionsCommand, EC2Client } from '@aws-sdk/client-ec2';
+import { GetImageCommand, ImagebuilderClient } from '@aws-sdk/client-imagebuilder';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import * as AWSLambda from 'aws-lambda';
-import * as AWS from 'aws-sdk';
 import { customResourceRespond } from '../lambda-helpers';
 
-const ssm = new AWS.SSM();
-const ec2 = new AWS.EC2();
+const ssm = new SSMClient();
+const ec2 = new EC2Client();
+const ib = new ImagebuilderClient();
 
 
 async function handleAmi(event: AWSLambda.CloudFormationCustomResourceEvent, ami: string) {
-  const imageDescs = (await ec2.describeImages({ ImageIds: [ami] }).promise());
+  const imageDescs = (await ec2.send(new DescribeImagesCommand({ ImageIds: [ami] })));
   if (imageDescs.Images?.length !== 1) {
     await customResourceRespond(event, 'FAILED', `${ami} doesn't exist`, 'ERROR', {});
     return;
@@ -28,7 +31,7 @@ async function handleAmi(event: AWSLambda.CloudFormationCustomResourceEvent, ami
 
 export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent, context: AWSLambda.Context) {
   try {
-    console.log(JSON.stringify({ ...event, ResponseURL: '...' }));
+    console.log({ ...event, ResponseURL: '...' });
 
     const ami = event.ResourceProperties.Ami as string;
 
@@ -46,7 +49,7 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
           const ssmParam = ami.substring('resolve:ssm:'.length);
           console.log(`Checking SSM ${ssmParam}`);
 
-          const ssmValue = (await ssm.getParameter({ Name: ssmParam }).promise()).Parameter?.Value;
+          const ssmValue = (await ssm.send(new GetParameterCommand({ Name: ssmParam }))).Parameter?.Value;
           if (!ssmValue) {
             await customResourceRespond(event, 'FAILED', `${ami} has no value`, 'ERROR', {});
             break;
@@ -59,7 +62,7 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
         if (ami.startsWith('lt-')) {
           console.log(`Checking Launch Template ${ami}`);
 
-          const lts = await ec2.describeLaunchTemplateVersions({ LaunchTemplateId: ami, Versions: ['$Latest'] }).promise();
+          const lts = await ec2.send(new DescribeLaunchTemplateVersionsCommand({ LaunchTemplateId: ami, Versions: ['$Latest'] }));
           if (lts.LaunchTemplateVersions?.length !== 1) {
             await customResourceRespond(event, 'FAILED', `${ami} doesn't exist`, 'ERROR', {});
             break;
@@ -71,6 +74,20 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
           }
 
           await handleAmi(event, lts.LaunchTemplateVersions[0].LaunchTemplateData.ImageId);
+          break;
+        }
+
+        if (ami.match('^arn:aws[^:]*:imagebuilder:[^:]+:[^:]+:image/.*$')) {
+          console.log(`Checking Image Builder ${ami}`);
+
+          const img = await ib.send(new GetImageCommand({ imageBuildVersionArn: ami }));
+          const actualAmi = img.image?.outputResources?.amis?.[0]?.image;
+          if (!actualAmi) {
+            await customResourceRespond(event, 'FAILED', `${ami} doesn't have an AMI`, 'ERROR', {});
+            break;
+          }
+
+          await handleAmi(event, actualAmi);
           break;
         }
 

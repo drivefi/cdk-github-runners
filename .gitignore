@@ -35,7 +35,6 @@ cdk.out
 cdk.context.json
 /.idea
 status.json
-!/.projenrc.js
 /test-reports/
 junit.xml
 /coverage/
@@ -45,7 +44,6 @@ junit.xml
 !/.github/workflows/release.yml
 !/.mergify.yml
 !/.github/workflows/upgrade-main.yml
-!/.npmrc
 !/test/
 !/tsconfig.dev.json
 !/src/
@@ -58,12 +56,11 @@ tsconfig.json
 /assets/
 !/src/delete-failed-runner-function.ts
 !/src/idle-runner-repear-function.ts
-!/src/image-builders/aws-image-builder/delete-ami-function.ts
+!/src/image-builders/aws-image-builder/delete-resources-function.ts
 !/src/image-builders/aws-image-builder/filter-failed-builds-function.ts
-!/src/image-builders/aws-image-builder/reaper-function.ts
 !/src/image-builders/aws-image-builder/versioner-function.ts
+!/src/image-builders/build-image-function.ts
 !/src/providers/ami-root-device-function.ts
-!/src/providers/build-image-function.ts
 !/src/providers/update-lambda-function.ts
 !/src/setup-function.ts
 !/src/status-function.ts
@@ -82,3 +79,5 @@ test/default.integ.snapshot/**/tree.json
 !/cdk.json
 /cdk.out/
 .cdk.staging/
+!/.vscode/settings.json
+!/.projenrc.js

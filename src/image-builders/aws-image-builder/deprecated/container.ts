@@ -5,7 +5,6 @@ import {
   aws_iam as iam,
   aws_imagebuilder as imagebuilder,
   aws_logs as logs,
-  CustomResource,
   Duration,
   RemovalPolicy,
   Stack,
@@ -16,8 +15,8 @@ import { ImageBuilderBase } from './common';
 import { LinuxUbuntuComponents } from './linux-components';
 import { WindowsComponents } from './windows-components';
 import { Architecture, Os, RunnerAmi, RunnerImage, RunnerVersion } from '../../../providers';
-import { BuildImageFunction } from '../../../providers/build-image-function';
 import { singletonLambda } from '../../../utils';
+import { BuildImageFunction } from '../../build-image-function';
 import { uniqueImageBuilderName } from '../../common';
 import { ImageBuilderComponent } from '../builder';
 import { ContainerRecipe } from '../container';
@@ -101,7 +100,7 @@ export interface ContainerImageBuilderProps {
   /**
    * The instance type used to build the image.
    *
-   * @default m5.large
+   * @default m6i.large
    */
   readonly instanceType?: ec2.InstanceType;
 
@@ -150,7 +149,7 @@ export interface ContainerImageBuilderProps {
  */
 export class ContainerImageBuilder extends ImageBuilderBase {
   readonly repository: ecr.IRepository;
-  private readonly parentImage: string | undefined;
+  private readonly parentImage: string;
   private boundImage?: RunnerImage;
 
   constructor(scope: Construct, id: string, props?: ContainerImageBuilderProps) {
@@ -170,13 +169,14 @@ export class ContainerImageBuilder extends ImageBuilderBase {
       imageTypeName: 'image',
     });
 
-    this.parentImage = props?.parentImage;
+    this.parentImage = props?.parentImage ?? 'mcr.microsoft.com/windows/servercore:ltsc2019-amd64';
 
     // create repository that only keeps one tag
     this.repository = new ecr.Repository(this, 'Repository', {
       imageScanOnPush: true,
       imageTagMutability: TagMutability.MUTABLE,
       removalPolicy: RemovalPolicy.DESTROY,
+      emptyOnDelete: true,
       lifecycleRules: [
         {
           description: 'Remove all but the latest image',
@@ -273,6 +273,7 @@ export class ContainerImageBuilder extends ImageBuilderBase {
       targetRepository: this.repository,
       dockerfileTemplate: dockerfileTemplate.replace('___RUNNER_VERSION___', this.runnerVersion.version),
       parentImage: this.parentImage,
+      tags: {},
     });
 
     const log = this.createLog(recipe.name);
@@ -280,10 +281,10 @@ export class ContainerImageBuilder extends ImageBuilderBase {
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
       iam.ManagedPolicy.fromAwsManagedPolicyName('EC2InstanceProfileForImageBuilderECRContainerBuilds'),
     ]);
-    const image = this.createImage(infra, dist, log, undefined, recipe.arn);
+    this.createImage(infra, dist, log, undefined, recipe.arn);
     this.createPipeline(infra, dist, log, undefined, recipe.arn);
 
-    this.imageCleaner(image, recipe.name);
+    this.imageCleaner();
 
     this.boundImage = {
       imageRepository: this.repository,
@@ -298,43 +299,17 @@ export class ContainerImageBuilder extends ImageBuilderBase {
     return this.boundImage;
   }
 
-  private imageCleaner(image: imagebuilder.CfnImage, recipeName: string) {
-    const crHandler = singletonLambda(BuildImageFunction, this, 'build-image', {
-      description: 'Custom resource handler that triggers CodeBuild to build runner images, and cleans-up images on deletion',
+  private imageCleaner() {
+    // cleaning up in the image builder was always ugly... time to get rid of it
+    cdk.Annotations.of(this).addWarning('The image cleaner for this deprecated class has been disabled. Some EC2 Image Builder resources may be left behind once you remove this construct. You can manually delete them from the AWS Management Console.');
+
+    // we keep the lambda itself around, in case the user doesn't have any other instances of it
+    // if there are no other instances of it, the custom resource will be deleted with the original lambda source code which may delete the images on its way out
+    singletonLambda(BuildImageFunction, this, 'build-image', {
+      description: 'Custom resource handler that triggers CodeBuild to build runner images',
       timeout: cdk.Duration.minutes(3),
       logRetention: logs.RetentionDays.ONE_MONTH,
     });
-
-    const policy = new iam.Policy(this, 'CR Policy', {
-      statements: [
-        new iam.PolicyStatement({
-          actions: ['ecr:BatchDeleteImage', 'ecr:ListImages'],
-          resources: [this.repository.repositoryArn],
-        }),
-        new iam.PolicyStatement({
-          actions: ['imagebuilder:ListImages', 'imagebuilder:ListImageBuildVersions', 'imagebuilder:DeleteImage'],
-          resources: ['*'], // Image Builder doesn't support scoping this :(
-        }),
-      ],
-    });
-    crHandler.role?.attachInlinePolicy(policy);
-
-    const cr = new CustomResource(this, 'Deleter', {
-      serviceToken: crHandler.functionArn,
-      resourceType: 'Custom::ImageDeleter',
-      properties: {
-        RepoName: this.repository.repositoryName,
-        ImageBuilderName: recipeName, // we don't use image.name because CloudFormation complains if it was deleted already
-        DeleteOnly: true,
-      },
-    });
-
-    // add dependencies to make sure resources are there when we need them
-    cr.node.addDependency(image);
-    cr.node.addDependency(policy);
-    cr.node.addDependency(crHandler);
-
-    return cr;
   }
 
   bindAmi(): RunnerAmi {

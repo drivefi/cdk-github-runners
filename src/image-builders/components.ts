@@ -7,7 +7,7 @@ import { Architecture, Os, RunnerVersion } from '../providers';
 
 export interface RunnerImageComponentCustomProps {
   /**
-   * Component name used for (1) image build logging and (2) identifier for {@link ImageRunnerBuilder.removeComponent}.
+   * Component name used for (1) image build logging and (2) identifier for {@link IConfigurableRunnerImageBuilder.removeComponent}.
    *
    * Name must only contain alphanumeric characters and dashes.
    */
@@ -97,7 +97,12 @@ export abstract class RunnerImageComponent {
         } else if (os.is(Os.LINUX_AMAZON_2)) {
           return [
             'yum update -y',
-            'yum install -y jq tar gzip bzip2 which binutils zip unzip sudo shadow-utils',
+            'yum install -y jq tar gzip bzip2 which binutils zip unzip sudo shadow-utils amazon-cloudwatch-agent',
+          ];
+        } else if (os.is(Os.LINUX_AMAZON_2023)) {
+          return [
+            'dnf upgrade -y',
+            'dnf install -y jq tar gzip bzip2 which binutils zip unzip sudo shadow-utils findutils amazon-cloudwatch-agent',
           ];
         } else if (os.is(Os.WINDOWS)) {
           return [
@@ -123,10 +128,9 @@ export abstract class RunnerImageComponent {
           return [
             'addgroup runner',
             'adduser --system --disabled-password --home /home/runner --ingroup runner runner',
-            'usermod -aG sudo runner',
-            'echo "%sudo   ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/runner',
+            'echo "%runner   ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/runner',
           ];
-        } else if (os.is(Os.LINUX_AMAZON_2)) {
+        } else if (os.is(Os.LINUX_AMAZON_2) || os.is(Os.LINUX_AMAZON_2023)) {
           return [
             '/usr/sbin/groupadd runner',
             '/usr/sbin/useradd --system --shell /usr/sbin/nologin --home-dir /home/runner --gid runner runner',
@@ -151,7 +155,7 @@ export abstract class RunnerImageComponent {
       name = 'AwsCli';
 
       getCommands(os: Os, architecture: Architecture) {
-        if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2)) {
+        if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2) || os.is(Os.LINUX_AMAZON_2023)) {
           let archUrl: string;
           if (architecture.is(Architecture.X86_64)) {
             archUrl = 'x86_64';
@@ -200,6 +204,11 @@ export abstract class RunnerImageComponent {
             'curl -fsSSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo',
             'yum install -y gh',
           ];
+        } else if (os.is(Os.LINUX_AMAZON_2023)) {
+          return [
+            'curl -fsSSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo',
+            'dnf install -y gh',
+          ];
         } else if (os.is(Os.WINDOWS)) {
           return [
             'cmd /c curl -w "%{redirect_url}" -fsS https://github.com/cli/cli/releases/latest > $Env:TEMP\\latest-gh',
@@ -235,6 +244,10 @@ export abstract class RunnerImageComponent {
           return [
             'yum install -y git',
           ];
+        } else if (os.is(Os.LINUX_AMAZON_2023)) {
+          return [
+            'dnf install -y git',
+          ];
         } else if (os.is(Os.WINDOWS)) {
           return [
             'cmd /c curl -w "%{redirect_url}" -fsS https://github.com/git-for-windows/git/releases/latest > $Env:TEMP\\latest-git',
@@ -265,7 +278,7 @@ export abstract class RunnerImageComponent {
       name = 'GithubRunner';
 
       getCommands(os: Os, architecture: Architecture) {
-        if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2)) {
+        if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2) || os.is(Os.LINUX_AMAZON_2023)) {
           let versionCommand: string;
           if (runnerVersion.is(RunnerVersion.latest())) {
             versionCommand = 'RUNNER_VERSION=`curl -w "%{redirect_url}" -fsS https://github.com/actions/runner/releases/latest | grep -oE "[^/v]+$"`';
@@ -294,7 +307,11 @@ export abstract class RunnerImageComponent {
             commands.push('/home/runner/bin/installdependencies.sh');
           } else if (os.is(Os.LINUX_AMAZON_2)) {
             commands.push('yum install -y openssl-libs krb5-libs zlib libicu60');
+          } else if (os.is(Os.LINUX_AMAZON_2023)) {
+            commands.push('dnf install -y openssl-libs krb5-libs zlib libicu-67.1');
           }
+
+          commands.push('mkdir -p /opt/hostedtoolcache', 'chown runner /opt/hostedtoolcache');
 
           return commands;
         } else if (os.is(Os.WINDOWS)) {
@@ -308,6 +325,24 @@ export abstract class RunnerImageComponent {
           } else {
             runnerCommands = [`$RUNNER_VERSION = '${runnerVersion.version}'`];
           }
+
+          runnerCommands = runnerCommands.concat([
+            // create directories
+            'mkdir C:\\hostedtoolcache\\windows',
+            'mkdir C:\\tools',
+            // download zstd and extract to C:\tools
+            'cmd /c curl -w "%{redirect_url}" -fsS https://github.com/facebook/zstd/releases/latest > $Env:TEMP\\latest-zstd',
+            '$LatestUrl = Get-Content $Env:TEMP\\latest-zstd',
+            '$ZSTD_VERSION = ($LatestUrl -Split \'/\')[-1].substring(1)',
+            'Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/facebook/zstd/releases/download/v$ZSTD_VERSION/zstd-v$ZSTD_VERSION-win64.zip" -OutFile zstd.zip',
+            'Expand-Archive zstd.zip -DestinationPath C:\\tools',
+            'Move-Item -Path C:\\tools\\zstd-v$ZSTD_VERSION-win64\\zstd.exe C:\\tools',
+            'Remove-Item -LiteralPath "C:\\tools\\zstd-v$ZSTD_VERSION-win64" -Force -Recurse',
+            'del zstd.zip',
+            // add C:\tools to PATH
+            '$persistedPaths = [Environment]::GetEnvironmentVariable(\'Path\', [EnvironmentVariableTarget]::Machine)',
+            '[Environment]::SetEnvironmentVariable("PATH", $persistedPaths + ";C:\\tools", [EnvironmentVariableTarget]::Machine)',
+          ]);
 
           return runnerCommands.concat([
             'Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-win-x64-${RUNNER_VERSION}.zip" -OutFile actions.zip',
@@ -352,6 +387,18 @@ export abstract class RunnerImageComponent {
         } else if (os.is(Os.LINUX_AMAZON_2)) {
           return [
             'yum install -y docker',
+            'sudo usermod -a -G docker runner',
+            'curl -sfLo /usr/bin/docker-compose https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m)',
+            'chmod +x /usr/bin/docker-compose',
+            'ln -s /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose',
+          ];
+        } else if (os.is(Os.LINUX_AMAZON_2023)) {
+          return [
+            'dnf install -y docker',
+            'sudo usermod -a -G docker runner',
+            'curl -sfLo /usr/bin/docker-compose https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m)',
+            'chmod +x /usr/bin/docker-compose',
+            'ln -s /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose',
           ];
         } else if (os.is(Os.WINDOWS)) {
           return [
@@ -394,47 +441,11 @@ export abstract class RunnerImageComponent {
 
   /**
    * A component to install Docker-in-Docker.
+   *
+   * @deprecated use `docker()`
    */
   static dockerInDocker(): RunnerImageComponent {
-    return new class extends RunnerImageComponent {
-      name = 'Docker-in-Docker';
-
-      getCommands(os: Os, architecture: Architecture) {
-        if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2)) {
-          let archUrl: string;
-          if (architecture.is(Architecture.X86_64)) {
-            archUrl = 'x86_64';
-          } else if (architecture.is(Architecture.ARM64)) {
-            archUrl = 'aarch64';
-          } else {
-            throw new Error(`Unsupported architecture for Docker-in-Docker: ${architecture.name}`);
-          }
-
-          return [
-            'DOCKER_CHANNEL="stable"',
-            'DIND_COMMIT="42b1175eda071c0e9121e1d64345928384a93df1"',
-            'DOCKER_VERSION="20.10.18"',
-            'DOCKER_COMPOSE_VERSION="2.11.0"',
-            `curl -fsSL "https://download.docker.com/linux/static/\${DOCKER_CHANNEL}/${archUrl}/docker-\${DOCKER_VERSION}.tgz" -o docker.tgz`,
-            'tar --strip-components 1 -C /usr/local/bin/ -xzf docker.tgz',
-            'rm docker.tgz',
-            '# set up subuid/subgid so that "--userns-remap=default" works out-of-the box',
-            'addgroup dockremap',
-            'useradd -g dockremap dockremap',
-            'echo \'dockremap:165536:65536\' >> /etc/subuid',
-            'echo \'dockremap:165536:65536\' >> /etc/subgid',
-            'curl -fsSL "https://raw.githubusercontent.com/docker/docker/${DIND_COMMIT}/hack/dind" -o /usr/local/bin/dind',
-            `curl -fsSL https://github.com/docker/compose/releases/download/v\${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${archUrl} -o /usr/local/bin/docker-compose`,
-            'mkdir -p /home/runner/.docker/cli-plugins && ln -s /usr/local/bin/docker-compose /home/runner/.docker/cli-plugins/docker-compose',
-            'chown -R runner /home/runner/.docker',
-            'chmod +x /usr/local/bin/dind /usr/local/bin/docker-compose',
-            'addgroup docker && usermod -aG docker runner',
-          ];
-        }
-
-        throw new Error(`Unknown os/architecture combo for Docker-in-Docker: ${os.name}/${architecture.name}`);
-      }
-    }();
+    return RunnerImageComponent.docker();
   }
 
   /**
@@ -456,7 +467,7 @@ export abstract class RunnerImageComponent {
           return [
             'update-ca-certificates',
           ];
-        } else if (os.is(Os.LINUX_AMAZON_2)) {
+        } else if (os.is(Os.LINUX_AMAZON_2) || os.is(Os.LINUX_AMAZON_2023)) {
           return [
             'update-ca-trust',
           ];
@@ -475,7 +486,7 @@ export abstract class RunnerImageComponent {
           return [
             { source, target: `/usr/local/share/ca-certificates/${name}.crt` },
           ];
-        } else if (os.is(Os.LINUX_AMAZON_2)) {
+        } else if (os.is(Os.LINUX_AMAZON_2) || os.is(Os.LINUX_AMAZON_2023)) {
           return [
             { source, target: `/etc/pki/ca-trust/source/anchors/${name}.crt` },
           ];
@@ -498,7 +509,7 @@ export abstract class RunnerImageComponent {
       name = 'Lambda-Entrypoint';
 
       getCommands(os: Os, _architecture: Architecture) {
-        if (!os.is(Os.LINUX_AMAZON_2) && !os.is(Os.LINUX_UBUNTU)) {
+        if (!os.isIn(Os._ALL_LINUX_VERSIONS)) {
           throw new Error(`Unsupported OS for Lambda entrypoint: ${os.name}`);
         }
 
@@ -508,21 +519,51 @@ export abstract class RunnerImageComponent {
       getAssets(_os: Os, _architecture: Architecture): RunnerImageAsset[] {
         return [
           {
-            source: path.join(__dirname, '..', '..', 'assets', 'docker-images', 'lambda', 'linux-x64', 'runner.js'),
-            target: '${LAMBDA_TASK_ROOT}/runner.js',
+            source: path.join(__dirname, '..', '..', 'assets', 'providers', 'lambda-bootstrap.sh'),
+            target: '/bootstrap.sh',
           },
           {
-            source: path.join(__dirname, '..', '..', 'assets', 'docker-images', 'lambda', 'linux-x64', 'runner.sh'),
-            target: '${LAMBDA_TASK_ROOT}/runner.sh',
+            source: path.join(__dirname, '..', '..', 'assets', 'providers', 'lambda-runner.sh'),
+            target: '/runner.sh',
           },
         ];
       }
 
       getDockerCommands(_os: Os, _architecture: Architecture): string[] {
         return [
-          'WORKDIR ${LAMBDA_TASK_ROOT}',
-          'CMD ["runner.handler"]',
+          'ENTRYPOINT ["bash", "/bootstrap.sh"]',
         ];
+      }
+    };
+  }
+
+  /**
+   * A component to add environment variables for jobs the runner executes.
+   *
+   * These variables only affect the jobs ran by the runner. They are not global. They do not affect other components.
+   *
+   * It is not recommended to use this component to pass secrets. Instead, use GitHub Secrets or AWS Secrets Manager.
+   *
+   * Must be used after the {@link githubRunner} component.
+   */
+  static environmentVariables(vars: Record<string, string>): RunnerImageComponent {
+    Object.entries(vars).forEach(e => {
+      if (e[0].includes('\n') || e[1].includes('\n')) {
+        throw new Error(`Environment variable cannot contain newlines: ${e}`);
+      }
+    });
+
+    return new class extends RunnerImageComponent {
+      name = 'EnvironmentVariables';
+
+      getCommands(os: Os, _architecture: Architecture) {
+        if (os.isIn(Os._ALL_LINUX_VERSIONS)) {
+          return Object.entries(vars).map(e => `echo '${e[0]}=${e[1].replace(/'/g, "'\"'\"'")}' >> /home/runner/.env`);
+        } else if (os.is(Os.WINDOWS)) {
+          return Object.entries(vars).map(e => `Add-Content -Path C:\\actions\\.env -Value '${e[0]}=${e[1].replace(/'/g, "''")}'`);
+        } else {
+          throw new Error(`Unsupported OS for environment variables component: ${os.name}`);
+        }
       }
     };
   }
@@ -530,7 +571,7 @@ export abstract class RunnerImageComponent {
   /**
    * Component name.
    *
-   * Used to identify component in image build logs, and for {@link RunnerImageBuilder.removeComponent}
+   * Used to identify component in image build logs, and for {@link IConfigurableRunnerImageBuilder.removeComponent}
    */
   abstract readonly name: string;
 
@@ -569,7 +610,7 @@ export abstract class RunnerImageComponent {
    */
   _asAwsImageBuilderComponent(scope: Construct, id: string, os: Os, architecture: Architecture) {
     let platform: 'Linux' | 'Windows';
-    if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2)) {
+    if (os.is(Os.LINUX_UBUNTU) || os.is(Os.LINUX_AMAZON_2) || os.is(Os.LINUX_AMAZON_2023)) {
       platform = 'Linux';
     } else if (os.is(Os.WINDOWS)) {
       platform = 'Windows';

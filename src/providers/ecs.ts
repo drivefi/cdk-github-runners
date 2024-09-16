@@ -28,6 +28,7 @@ import {
 } from './common';
 import { ecsRunCommand } from './fargate';
 import { IRunnerImageBuilder, RunnerImageBuilder, RunnerImageBuilderProps, RunnerImageComponent } from '../image-builders';
+import { MINIMAL_EC2_SSM_SESSION_MANAGER_POLICY_STATEMENT, MINIMAL_ECS_SSM_SESSION_MANAGER_POLICY_STATEMENT } from '../utils';
 
 /**
  * Properties for EcsRunnerProvider.
@@ -109,14 +110,21 @@ export interface EcsRunnerProviderProps extends RunnerProviderProps {
   /**
    * The amount (in MiB) of memory used by the task.
    *
-   * @default 3500
+   * @default 3500, unless `memoryReservationMiB` is used and then it's undefined
    */
   readonly memoryLimitMiB?: number;
 
   /**
+   * The soft limit (in MiB) of memory to reserve for the container.
+   *
+   * @default undefined
+   */
+  readonly memoryReservationMiB?: number;
+
+  /**
    * Instance type of ECS cluster instances. Only used when creating a new cluster.
    *
-   * @default m5.large or m6g.large
+   * @default m6i.large or m6g.large
    */
   readonly instanceType?: ec2.InstanceType;
 
@@ -166,6 +174,7 @@ export interface EcsRunnerProviderProps extends RunnerProviderProps {
 
 interface EcsEc2LaunchTargetProps {
   readonly capacityProvider: string;
+  readonly enableExecute: boolean;
 }
 
 class EcsEc2LaunchTarget implements stepfunctions_tasks.IEcsLaunchTarget {
@@ -180,6 +189,7 @@ class EcsEc2LaunchTarget implements stepfunctions_tasks.IEcsLaunchTarget {
     return {
       parameters: {
         PropagateTags: ecs.PropagatedTagSource.TASK_DEFINITION,
+        EnableExecuteCommand: this.props.enableExecute,
         CapacityProviderStrategy: [
           {
             CapacityProvider: this.props.capacityProvider,
@@ -201,7 +211,13 @@ class EcsEc2LaunchTarget implements stepfunctions_tasks.IEcsLaunchTarget {
  */
 export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
   /**
-   * Create new image builder that builds ECS specific runner images using Ubuntu.
+   * Create new image builder that builds ECS specific runner images.
+   *
+   * You can customize the OS, architecture, VPC, subnet, security groups, etc. by passing in props.
+   *
+   * You can add components to the image builder by calling `imageBuilder.addComponent()`.
+   *
+   * The default OS is Ubuntu running on x64 architecture.
    *
    * Included components:
    *  * `RunnerImageComponent.requiredPackages()`
@@ -209,10 +225,10 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
    *  * `RunnerImageComponent.git()`
    *  * `RunnerImageComponent.githubCli()`
    *  * `RunnerImageComponent.awsCli()`
-   *  * `RunnerImageComponent.dockerInDocker()`
+   *  * `RunnerImageComponent.docker()`
    *  * `RunnerImageComponent.githubRunner()`
    */
-  public static imageBuilder(scope: Construct, id: string, props?: RunnerImageBuilderProps): RunnerImageBuilder {
+  public static imageBuilder(scope: Construct, id: string, props?: RunnerImageBuilderProps) {
     return RunnerImageBuilder.new(scope, id, {
       os: Os.LINUX_UBUNTU,
       architecture: Architecture.X86_64,
@@ -222,7 +238,7 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
         RunnerImageComponent.git(),
         RunnerImageComponent.githubCli(),
         RunnerImageComponent.awsCli(),
-        RunnerImageComponent.dockerInDocker(),
+        RunnerImageComponent.docker(),
         RunnerImageComponent.githubRunner(props?.runnerVersion ?? RunnerVersion.latest()),
       ],
       ...props,
@@ -343,7 +359,7 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
         instanceType: props?.instanceType ?? this.defaultClusterInstanceType(),
         blockDevices: props?.storageSize ? [
           {
-            deviceName: amiRootDevice(this, this.defaultClusterInstanceAmi().getImage(this).imageId),
+            deviceName: amiRootDevice(this, this.defaultClusterInstanceAmi().getImage(this).imageId).ref,
             volume: {
               ebsDevice: {
                 volumeSize: props.storageSize.toGibibytes(),
@@ -379,8 +395,13 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
       });
     }
 
-    this.capacityProvider.autoScalingGroup.addUserData(this.loginCommand(), this.pullCommand(), ...this.ecsSettingsCommands());
-    this.capacityProvider.autoScalingGroup.role.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'));
+    this.capacityProvider.autoScalingGroup.addUserData(
+      // we don't exit on errors because all of these commands are optional
+      ...this.loginCommands(),
+      this.pullCommand(),
+      ...this.ecsSettingsCommands(),
+    );
+    this.capacityProvider.autoScalingGroup.role.addToPrincipalPolicy(MINIMAL_EC2_SSM_SESSION_MANAGER_POLICY_STATEMENT);
     image.imageRepository.grantPull(this.capacityProvider.autoScalingGroup);
 
     this.cluster.addAsgCapacityProvider(
@@ -404,7 +425,8 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
       {
         image: ecs.AssetImage.fromEcrRepository(image.imageRepository, image.imageTag),
         cpu: props?.cpu ?? 1024,
-        memoryLimitMiB: props?.memoryLimitMiB ?? 3500,
+        memoryLimitMiB: props?.memoryLimitMiB ?? (props?.memoryReservationMiB ? undefined : 3500),
+        memoryReservationMiB: props?.memoryReservationMiB,
         logging: ecs.AwsLogDriver.awsLogs({
           logGroup: this.logGroup,
           streamPrefix: 'runner',
@@ -416,11 +438,14 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
     );
 
     this.grantPrincipal = this.task.taskRole;
+
+    // permissions for SSM Session Manager
+    this.task.taskRole.addToPrincipalPolicy(MINIMAL_ECS_SSM_SESSION_MANAGER_POLICY_STATEMENT);
   }
 
   private defaultClusterInstanceType() {
     if (this.image.architecture.is(Architecture.X86_64)) {
-      return ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE);
+      return ec2.InstanceType.of(ec2.InstanceClass.M6I, ec2.InstanceSize.LARGE);
     }
     if (this.image.architecture.is(Architecture.ARM64)) {
       return ec2.InstanceType.of(ec2.InstanceClass.M6G, ec2.InstanceSize.LARGE);
@@ -434,15 +459,15 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
     let ssmPath: string;
     let found = false;
 
-    if (this.image.os.is(Os.LINUX) || this.image.os.is(Os.LINUX_UBUNTU) || this.image.os.is(Os.LINUX_AMAZON_2)) {
+    if (this.image.os.isIn(Os._ALL_LINUX_VERSIONS)) {
       if (this.image.architecture.is(Architecture.X86_64)) {
         baseImage = ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.STANDARD);
-        ssmPath = '/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id';
+        ssmPath = '/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id';
         found = true;
       }
       if (this.image.architecture.is(Architecture.ARM64)) {
         baseImage = ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.ARM);
-        ssmPath = '/aws/service/ecs/optimized-ami/amazon-linux-2/arm64/recommended/image_id';
+        ssmPath = '/aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id';
         found = true;
       }
     }
@@ -479,12 +504,15 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
     return `docker pull ${this.image.imageRepository.repositoryUri}:${this.image.imageTag} &`;
   }
 
-  private loginCommand() {
+  private loginCommands() {
     const thisStack = Stack.of(this);
     if (this.image.os.is(Os.WINDOWS)) {
-      return `(Get-ECRLoginCommand).Password | docker login --username AWS --password-stdin ${thisStack.account}.dkr.ecr.${thisStack.region}.amazonaws.com`;
+      return [`(Get-ECRLoginCommand).Password | docker login --username AWS --password-stdin ${thisStack.account}.dkr.ecr.${thisStack.region}.amazonaws.com`];
     }
-    return `aws ecr get-login-password --region ${thisStack.region} | docker login --username AWS --password-stdin ${thisStack.account}.dkr.ecr.${thisStack.region}.amazonaws.com`;
+    return [
+      'yum install -y awscli || dnf install -y awscli',
+      `aws ecr get-login-password --region ${thisStack.region} | docker login --username AWS --password-stdin ${thisStack.account}.dkr.ecr.${thisStack.region}.amazonaws.com`,
+    ];
   }
 
   private ecsSettingsCommands() {
@@ -517,7 +545,10 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
         integrationPattern: IntegrationPattern.RUN_JOB, // sync
         taskDefinition: this.task,
         cluster: this.cluster,
-        launchTarget: new EcsEc2LaunchTarget({ capacityProvider: this.capacityProvider.capacityProviderName }),
+        launchTarget: new EcsEc2LaunchTarget({
+          capacityProvider: this.capacityProvider.capacityProviderName,
+          enableExecute: this.image.os.isIn(Os._ALL_LINUX_VERSIONS),
+        }),
         assignPublicIp: this.assignPublicIp,
         containerOverrides: [
           {
@@ -546,6 +577,10 @@ export class EcsRunnerProvider extends BaseProvider implements IRunnerProvider {
               {
                 name: 'REPO',
                 value: parameters.repoPath,
+              },
+              {
+                name: 'REGISTRATION_URL',
+                value: parameters.registrationUrl,
               },
             ],
           },

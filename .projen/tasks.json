@@ -32,14 +32,15 @@
         "CHANGELOG": "dist/changelog.md",
         "BUMPFILE": "dist/version.txt",
         "RELEASETAG": "dist/releasetag.txt",
-        "RELEASE_TAG_PREFIX": ""
+        "RELEASE_TAG_PREFIX": "",
+        "BUMP_PACKAGE": "commit-and-tag-version@^12"
       },
       "steps": [
         {
           "builtin": "release/bump-version"
         }
       ],
-      "condition": "! git log --oneline -1 | grep -q \"chore(release):\""
+      "condition": "git log --oneline -1 | grep -qv \"chore(release):\""
     },
     "bundle": {
       "name": "bundle",
@@ -52,22 +53,19 @@
           "spawn": "bundle:idle-runner-repear.lambda"
         },
         {
-          "spawn": "bundle:image-builders/aws-image-builder/delete-ami.lambda"
+          "spawn": "bundle:image-builders/aws-image-builder/delete-resources.lambda"
         },
         {
           "spawn": "bundle:image-builders/aws-image-builder/filter-failed-builds.lambda"
         },
         {
-          "spawn": "bundle:image-builders/aws-image-builder/reaper.lambda"
-        },
-        {
           "spawn": "bundle:image-builders/aws-image-builder/versioner.lambda"
         },
         {
-          "spawn": "bundle:providers/ami-root-device.lambda"
+          "spawn": "bundle:image-builders/build-image.lambda"
         },
         {
-          "spawn": "bundle:providers/build-image.lambda"
+          "spawn": "bundle:providers/ami-root-device.lambda"
         },
         {
           "spawn": "bundle:providers/update-lambda.lambda"
@@ -88,6 +86,9 @@
           "exec": "cp -r src/providers/docker-images assets"
         },
         {
+          "exec": "cp -r src/providers/lambda-*.sh assets/providers"
+        },
+        {
           "exec": "vite build setup"
         },
         {
@@ -100,7 +101,7 @@
       "description": "Create a JavaScript bundle from src/delete-failed-runner.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/delete-failed-runner.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/delete-failed-runner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/delete-failed-runner.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/delete-failed-runner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -109,7 +110,7 @@
       "description": "Continuously update the JavaScript bundle from src/delete-failed-runner.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/delete-failed-runner.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/delete-failed-runner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/delete-failed-runner.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/delete-failed-runner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -118,7 +119,7 @@
       "description": "Create a JavaScript bundle from src/idle-runner-repear.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/idle-runner-repear.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/idle-runner-repear.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/idle-runner-repear.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/idle-runner-repear.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -127,25 +128,25 @@
       "description": "Continuously update the JavaScript bundle from src/idle-runner-repear.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/idle-runner-repear.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/idle-runner-repear.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/idle-runner-repear.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/idle-runner-repear.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
-    "bundle:image-builders/aws-image-builder/delete-ami.lambda": {
-      "name": "bundle:image-builders/aws-image-builder/delete-ami.lambda",
-      "description": "Create a JavaScript bundle from src/image-builders/aws-image-builder/delete-ami.lambda.ts",
+    "bundle:image-builders/aws-image-builder/delete-resources.lambda": {
+      "name": "bundle:image-builders/aws-image-builder/delete-resources.lambda",
+      "description": "Create a JavaScript bundle from src/image-builders/aws-image-builder/delete-resources.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/delete-ami.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/delete-ami.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/image-builders/aws-image-builder/delete-resources.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/delete-resources.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
-    "bundle:image-builders/aws-image-builder/delete-ami.lambda:watch": {
-      "name": "bundle:image-builders/aws-image-builder/delete-ami.lambda:watch",
-      "description": "Continuously update the JavaScript bundle from src/image-builders/aws-image-builder/delete-ami.lambda.ts",
+    "bundle:image-builders/aws-image-builder/delete-resources.lambda:watch": {
+      "name": "bundle:image-builders/aws-image-builder/delete-resources.lambda:watch",
+      "description": "Continuously update the JavaScript bundle from src/image-builders/aws-image-builder/delete-resources.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/delete-ami.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/delete-ami.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/image-builders/aws-image-builder/delete-resources.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/delete-resources.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -154,7 +155,7 @@
       "description": "Create a JavaScript bundle from src/image-builders/aws-image-builder/filter-failed-builds.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/filter-failed-builds.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/filter-failed-builds.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/image-builders/aws-image-builder/filter-failed-builds.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/filter-failed-builds.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -163,25 +164,7 @@
       "description": "Continuously update the JavaScript bundle from src/image-builders/aws-image-builder/filter-failed-builds.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/filter-failed-builds.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/filter-failed-builds.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
-        }
-      ]
-    },
-    "bundle:image-builders/aws-image-builder/reaper.lambda": {
-      "name": "bundle:image-builders/aws-image-builder/reaper.lambda",
-      "description": "Create a JavaScript bundle from src/image-builders/aws-image-builder/reaper.lambda.ts",
-      "steps": [
-        {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/reaper.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/reaper.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
-        }
-      ]
-    },
-    "bundle:image-builders/aws-image-builder/reaper.lambda:watch": {
-      "name": "bundle:image-builders/aws-image-builder/reaper.lambda:watch",
-      "description": "Continuously update the JavaScript bundle from src/image-builders/aws-image-builder/reaper.lambda.ts",
-      "steps": [
-        {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/reaper.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/reaper.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/image-builders/aws-image-builder/filter-failed-builds.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/filter-failed-builds.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -190,7 +173,7 @@
       "description": "Create a JavaScript bundle from src/image-builders/aws-image-builder/versioner.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/versioner.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/versioner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/image-builders/aws-image-builder/versioner.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/versioner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -199,7 +182,25 @@
       "description": "Continuously update the JavaScript bundle from src/image-builders/aws-image-builder/versioner.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/image-builders/aws-image-builder/versioner.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/versioner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/image-builders/aws-image-builder/versioner.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/aws-image-builder/versioner.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
+        }
+      ]
+    },
+    "bundle:image-builders/build-image.lambda": {
+      "name": "bundle:image-builders/build-image.lambda",
+      "description": "Create a JavaScript bundle from src/image-builders/build-image.lambda.ts",
+      "steps": [
+        {
+          "exec": "esbuild --bundle src/image-builders/build-image.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/build-image.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
+        }
+      ]
+    },
+    "bundle:image-builders/build-image.lambda:watch": {
+      "name": "bundle:image-builders/build-image.lambda:watch",
+      "description": "Continuously update the JavaScript bundle from src/image-builders/build-image.lambda.ts",
+      "steps": [
+        {
+          "exec": "esbuild --bundle src/image-builders/build-image.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/image-builders/build-image.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -208,7 +209,7 @@
       "description": "Create a JavaScript bundle from src/providers/ami-root-device.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/providers/ami-root-device.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/providers/ami-root-device.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/providers/ami-root-device.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/providers/ami-root-device.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -217,25 +218,7 @@
       "description": "Continuously update the JavaScript bundle from src/providers/ami-root-device.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/providers/ami-root-device.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/providers/ami-root-device.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
-        }
-      ]
-    },
-    "bundle:providers/build-image.lambda": {
-      "name": "bundle:providers/build-image.lambda",
-      "description": "Create a JavaScript bundle from src/providers/build-image.lambda.ts",
-      "steps": [
-        {
-          "exec": "esbuild --bundle src/providers/build-image.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/providers/build-image.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
-        }
-      ]
-    },
-    "bundle:providers/build-image.lambda:watch": {
-      "name": "bundle:providers/build-image.lambda:watch",
-      "description": "Continuously update the JavaScript bundle from src/providers/build-image.lambda.ts",
-      "steps": [
-        {
-          "exec": "esbuild --bundle src/providers/build-image.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/providers/build-image.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/providers/ami-root-device.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/providers/ami-root-device.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -244,7 +227,7 @@
       "description": "Create a JavaScript bundle from src/providers/update-lambda.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/providers/update-lambda.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/providers/update-lambda.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/providers/update-lambda.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/providers/update-lambda.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -253,7 +236,7 @@
       "description": "Continuously update the JavaScript bundle from src/providers/update-lambda.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/providers/update-lambda.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/providers/update-lambda.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/providers/update-lambda.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/providers/update-lambda.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -262,7 +245,7 @@
       "description": "Create a JavaScript bundle from src/setup.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/setup.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/setup.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/setup.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/setup.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -271,7 +254,7 @@
       "description": "Continuously update the JavaScript bundle from src/setup.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/setup.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/setup.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/setup.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/setup.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -280,7 +263,7 @@
       "description": "Create a JavaScript bundle from src/status.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/status.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/status.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/status.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/status.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -289,7 +272,7 @@
       "description": "Continuously update the JavaScript bundle from src/status.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/status.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/status.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/status.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/status.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -298,7 +281,7 @@
       "description": "Create a JavaScript bundle from src/token-retriever.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/token-retriever.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/token-retriever.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/token-retriever.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/token-retriever.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -307,7 +290,7 @@
       "description": "Continuously update the JavaScript bundle from src/token-retriever.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/token-retriever.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/token-retriever.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/token-retriever.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/token-retriever.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -316,7 +299,7 @@
       "description": "Create a JavaScript bundle from src/webhook-handler.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/webhook-handler.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/webhook-handler.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk"
+          "exec": "esbuild --bundle src/webhook-handler.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/webhook-handler.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/*"
         }
       ]
     },
@@ -325,7 +308,7 @@
       "description": "Continuously update the JavaScript bundle from src/webhook-handler.lambda.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/webhook-handler.lambda.ts --target=\"node16\" --platform=\"node\" --outfile=\"assets/webhook-handler.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:aws-sdk --watch"
+          "exec": "esbuild --bundle src/webhook-handler.lambda.ts --target=\"node18\" --platform=\"node\" --outfile=\"assets/webhook-handler.lambda/index.js\" --tsconfig=\"tsconfig.dev.json\" --external:@aws-sdk/* --watch"
         }
       ]
     },
@@ -414,7 +397,8 @@
       "description": "Runs eslint against the codebase",
       "steps": [
         {
-          "exec": "eslint --ext .ts,.tsx --fix --no-error-on-unmatched-pattern src test build-tools .projenrc.js"
+          "exec": "eslint --ext .ts,.tsx --fix --no-error-on-unmatched-pattern $@ src test build-tools setup/src/*.ts setup/src/*.svelte .projenrc.js",
+          "receiveArgs": true
         }
       ]
     },
@@ -513,7 +497,12 @@
       "description": "Creates the distribution package",
       "steps": [
         {
-          "exec": "if [ ! -z ${CI} ]; then rsync -a . .repo --exclude .git --exclude node_modules && rm -rf dist && mv .repo dist; else npx projen package-all; fi"
+          "spawn": "package:js",
+          "condition": "node -e \"if (!process.env.CI) process.exit(1)\""
+        },
+        {
+          "spawn": "package-all",
+          "condition": "node -e \"if (process.env.CI) process.exit(1)\""
         }
       ]
     },
@@ -662,7 +651,8 @@
         "CHANGELOG": "dist/changelog.md",
         "BUMPFILE": "dist/version.txt",
         "RELEASETAG": "dist/releasetag.txt",
-        "RELEASE_TAG_PREFIX": ""
+        "RELEASE_TAG_PREFIX": "",
+        "BUMP_PACKAGE": "commit-and-tag-version@^12"
       },
       "steps": [
         {
@@ -678,28 +668,13 @@
       },
       "steps": [
         {
-          "exec": "yarn upgrade npm-check-updates"
-        },
-        {
-          "exec": "npm-check-updates --dep dev --upgrade --target=minor --reject='aws-cdk-lib,constructs,jsii,typescript'"
-        },
-        {
-          "exec": "npm-check-updates --dep optional --upgrade --target=minor --reject='aws-cdk-lib,constructs,jsii,typescript'"
-        },
-        {
-          "exec": "npm-check-updates --dep peer --upgrade --target=minor --reject='aws-cdk-lib,constructs,jsii,typescript'"
-        },
-        {
-          "exec": "npm-check-updates --dep prod --upgrade --target=minor --reject='aws-cdk-lib,constructs,jsii,typescript'"
-        },
-        {
-          "exec": "npm-check-updates --dep bundle --upgrade --target=minor --reject='aws-cdk-lib,constructs,jsii,typescript'"
+          "exec": "npx npm-check-updates@16 --upgrade --target=minor --peer --dep=dev,peer,prod,optional --filter=@aws-sdk/client-cloudformation,@aws-sdk/client-codebuild,@aws-sdk/client-ec2,@aws-sdk/client-ecr,@aws-sdk/client-imagebuilder,@aws-sdk/client-lambda,@aws-sdk/client-secrets-manager,@aws-sdk/client-sfn,@aws-sdk/client-sns,@aws-sdk/client-ssm,@octokit/auth-app,@octokit/core,@octokit/request-error,@octokit/rest,@types/aws-lambda,@types/jest,@types/semver,esbuild,eslint-import-resolver-typescript,eslint-plugin-import,jest,jsii-diff,jsii-pacmak,projen,semver,ts-jest,ts-node"
         },
         {
           "exec": "yarn install --check-files"
         },
         {
-          "exec": "yarn upgrade"
+          "exec": "yarn upgrade @aws-sdk/client-cloudformation @aws-sdk/client-codebuild @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-imagebuilder @aws-sdk/client-lambda @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-ssm @octokit/auth-app @octokit/core @octokit/request-error @octokit/rest @sveltejs/vite-plugin-svelte @tsconfig/svelte @types/aws-lambda @types/jest @types/node @types/semver @typescript-eslint/eslint-plugin @typescript-eslint/parser aws-cdk bootstrap commit-and-tag-version esbuild eslint-import-resolver-typescript eslint-plugin-import eslint-plugin-svelte eslint jest jest-junit jsii-diff jsii-docgen jsii-pacmak jsii-rosetta jsii projen sass semver svelte-check svelte-preprocess svelte ts-jest ts-node typescript vite-plugin-singlefile vite aws-cdk-lib constructs"
         },
         {
           "exec": "npx projen"
@@ -720,7 +695,7 @@
     }
   },
   "env": {
-    "PATH": "$(npx -c \"node -e \\\"console.log(process.env.PATH)\\\"\")"
+    "PATH": "$(npx -c \"node --print process.env.PATH\")"
   },
   "//": "~~ Generated by projen. To modify, edit .projenrc.js and run \"npx projen\"."
 }

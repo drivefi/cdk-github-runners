@@ -1,14 +1,17 @@
+import { CloudFormationClient, DescribeStackResourceCommand } from '@aws-sdk/client-cloudformation';
+import { DescribeLaunchTemplateVersionsCommand, EC2Client } from '@aws-sdk/client-ec2';
+import { ECRClient, DescribeImagesCommand } from '@aws-sdk/client-ecr';
+import { DescribeExecutionCommand, ListExecutionsCommand, SFNClient } from '@aws-sdk/client-sfn';
 import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/core';
 import * as AWSLambda from 'aws-lambda';
-import * as AWS from 'aws-sdk';
 import { baseUrlFromDomain, GitHubSecrets } from './lambda-github';
 import { getSecretJsonValue, getSecretValue } from './lambda-helpers';
 
-const cfn = new AWS.CloudFormation();
-const ec2 = new AWS.EC2();
-const ecr = new AWS.ECR();
-const sf = new AWS.StepFunctions();
+const cfn = new CloudFormationClient();
+const ec2 = new EC2Client();
+const ecr = new ECRClient();
+const sf = new SFNClient();
 
 function secretArnToUrl(arn: string) {
   const parts = arn.split(':'); // arn:aws:secretsmanager:us-east-1:12345678:secret:secret-name-REVISION
@@ -27,6 +30,13 @@ function lambdaArnToUrl(arn: string) {
   return `https://${region}.console.aws.amazon.com/lambda/home?region=${region}#/functions/${name}?tab=monitoring`;
 }
 
+function lambdaArnToLogGroup(arn: string) {
+  const parts = arn.split(':'); // arn:aws:lambda:us-east-1:12345678:function:name-XYZ
+  const name = parts[6];
+
+  return `/aws/lambda/${name}`;
+}
+
 function stepFunctionArnToUrl(arn: string) {
   const parts = arn.split(':'); // arn:aws:states:us-east-1:12345678:stateMachine:name-XYZ
   const region = parts[3];
@@ -35,7 +45,7 @@ function stepFunctionArnToUrl(arn: string) {
 }
 
 async function generateProvidersStatus(stack: string, logicalId: string) {
-  const resource = await cfn.describeStackResource({ StackName: stack, LogicalResourceId: logicalId }).promise();
+  const resource = await cfn.send(new DescribeStackResourceCommand({ StackName: stack, LogicalResourceId: logicalId }));
   const providers = JSON.parse(resource.StackResourceDetail?.Metadata ?? '{}').providers as any[] | undefined;
 
   if (!providers) {
@@ -45,13 +55,13 @@ async function generateProvidersStatus(stack: string, logicalId: string) {
   return Promise.all(providers.map(async (p) => {
     // add ECR data, if image is from ECR
     if (p.image?.imageRepository?.match(/[0-9]+\.dkr\.ecr\.[a-z0-9\-]+\.amazonaws\.com\/.+/)) {
-      const tags = await ecr.describeImages({
+      const tags = await ecr.send(new DescribeImagesCommand({
         repositoryName: p.image.imageRepository.split('/')[1],
         filter: {
           tagStatus: 'TAGGED',
         },
         maxResults: 1,
-      }).promise();
+      }));
       if (tags.imageDetails && tags.imageDetails?.length >= 1) {
         p.image.latestImage = {
           tags: tags.imageDetails[0].imageTags,
@@ -62,10 +72,10 @@ async function generateProvidersStatus(stack: string, logicalId: string) {
     }
     // add AMI data, if image is AMI
     if (p.ami?.launchTemplate) {
-      const versions = await ec2.describeLaunchTemplateVersions({
+      const versions = await ec2.send(new DescribeLaunchTemplateVersionsCommand({
         LaunchTemplateId: p.ami.launchTemplate,
         Versions: ['$Default'],
-      }).promise();
+      }));
       if (versions.LaunchTemplateVersions && versions.LaunchTemplateVersions.length >= 1) {
         p.ami.latestAmi = versions.LaunchTemplateVersions[0].LaunchTemplateData?.ImageId;
       }
@@ -103,10 +113,10 @@ function safeReturnValue(event: Partial<AWSLambda.APIGatewayProxyEvent>, status:
   return status;
 }
 
-exports.handler = async function (event: Partial<AWSLambda.APIGatewayProxyEvent>) {
+export async function handler(event: Partial<AWSLambda.APIGatewayProxyEvent>) {
   // confirm required environment variables
   if (!process.env.WEBHOOK_SECRET_ARN || !process.env.GITHUB_SECRET_ARN || !process.env.GITHUB_PRIVATE_KEY_SECRET_ARN || !process.env.LOGICAL_ID ||
-      !process.env.WEBHOOK_HANDLER_ARN || !process.env.STEP_FUNCTION_ARN || !process.env.SETUP_SECRET_ARN || !process.env.SETUP_FUNCTION_URL ||
+      !process.env.WEBHOOK_HANDLER_ARN || !process.env.STEP_FUNCTION_ARN || !process.env.SETUP_SECRET_ARN ||
       !process.env.STACK_NAME) {
     throw new Error('Missing environment variables');
   }
@@ -121,6 +131,7 @@ exports.handler = async function (event: Partial<AWSLambda.APIGatewayProxyEvent>
         secretUrl: secretArnToUrl(process.env.SETUP_SECRET_ARN),
       },
       domain: 'Unknown',
+      runnerLevel: 'Unknown',
       webhook: {
         url: process.env.WEBHOOK_URL,
         status: 'Unable to check',
@@ -146,6 +157,7 @@ exports.handler = async function (event: Partial<AWSLambda.APIGatewayProxyEvent>
     troubleshooting: {
       webhookHandlerArn: process.env.WEBHOOK_HANDLER_ARN,
       webhookHandlerUrl: lambdaArnToUrl(process.env.WEBHOOK_HANDLER_ARN),
+      webhookHandlerLogGroup: lambdaArnToLogGroup(process.env.WEBHOOK_HANDLER_ARN),
       stepFunctionArn: process.env.STEP_FUNCTION_ARN,
       stepFunctionUrl: stepFunctionArnToUrl(process.env.STEP_FUNCTION_ARN),
       stepFunctionLogGroup: process.env.STEP_FUNCTION_LOG_GROUP,
@@ -154,29 +166,33 @@ exports.handler = async function (event: Partial<AWSLambda.APIGatewayProxyEvent>
   };
 
   // setup url
-  const setupToken = (await getSecretJsonValue(process.env.SETUP_SECRET_ARN)).token;
-  if (setupToken) {
-    status.github.setup.status = 'Pending';
-    status.github.setup.url = `${process.env.SETUP_FUNCTION_URL}?token=${setupToken}`;
+  if (process.env.SETUP_FUNCTION_URL) {
+    const setupToken = (await getSecretJsonValue(process.env.SETUP_SECRET_ARN)).token;
+    if (setupToken) {
+      status.github.setup.status = 'Pending';
+      status.github.setup.url = `${process.env.SETUP_FUNCTION_URL}?token=${setupToken}`;
+    } else {
+      status.github.setup.status = 'Complete';
+    }
   } else {
-    status.github.setup.status = 'Complete';
+    status.github.setup.status = 'Disabled';
   }
 
   // list last 10 executions and their status
   try {
-    const executions = await sf.listExecutions({
+    const executions = await sf.send(new ListExecutionsCommand({
       stateMachineArn: process.env.STEP_FUNCTION_ARN,
       maxResults: 10,
-    }).promise();
-    for (const execution of executions.executions) {
-      const executionDetails = await sf.describeExecution({
+    }));
+    for (const execution of executions.executions ?? []) {
+      const executionDetails = await sf.send(new DescribeExecutionCommand({
         executionArn: execution.executionArn,
-      }).promise();
+      }));
       const input = JSON.parse(executionDetails.input || '{}');
 
       status.troubleshooting.recentRuns.push({
         executionArn: execution.executionArn,
-        status: execution.status,
+        status: execution.status ?? '<unknown>',
         owner: input.owner,
         repo: input.repo,
         jobId: input.jobId,
@@ -206,6 +222,9 @@ exports.handler = async function (event: Partial<AWSLambda.APIGatewayProxyEvent>
   // calculate base url
   let baseUrl = baseUrlFromDomain(githubSecrets.domain);
   status.github.domain = githubSecrets.domain;
+
+  // copy runner level
+  status.github.runnerLevel = githubSecrets.runnerLevel ?? 'repo';
 
   if (githubSecrets.personalAuthToken) {
     // try authenticating with personal access token
@@ -326,4 +345,4 @@ exports.handler = async function (event: Partial<AWSLambda.APIGatewayProxyEvent>
   }
 
   return safeReturnValue(event, status);
-};
+}

@@ -2,7 +2,7 @@ import { aws_ecr as ecr, aws_imagebuilder as imagebuilder } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { ImageBuilderComponent } from './builder';
 import { ImageBuilderObjectBase } from './common';
-import { Os } from '../../providers/common';
+import { Os } from '../../providers';
 import { uniqueImageBuilderName } from '../common';
 
 /**
@@ -41,10 +41,13 @@ export interface ContainerRecipeProperties {
 
   /**
    * Parent image for the new Docker Image.
-   *
-   * @default 'mcr.microsoft.com/windows/servercore:ltsc2019-amd64'
    */
-  readonly parentImage?: string;
+  readonly parentImage: string;
+
+  /**
+   * Tags to apply to the recipe and image.
+   */
+  readonly tags: { [key: string]: string };
 }
 
 /**
@@ -55,11 +58,10 @@ export interface ContainerRecipeProperties {
 export class ContainerRecipe extends ImageBuilderObjectBase {
   public readonly arn: string;
   public readonly name: string;
+  public readonly version: string;
 
   constructor(scope: Construct, id: string, props: ContainerRecipeProperties) {
     super(scope, id);
-
-    const name = uniqueImageBuilderName(this);
 
     let components = props.components.map(component => {
       return {
@@ -67,14 +69,19 @@ export class ContainerRecipe extends ImageBuilderObjectBase {
       };
     });
 
+    this.name = uniqueImageBuilderName(this);
+    this.version = this.generateVersion('ContainerRecipe', this.name, {
+      platform: props.platform,
+      components,
+      dockerfileTemplate: props.dockerfileTemplate,
+      tags: props.tags,
+    });
+
     const recipe = new imagebuilder.CfnContainerRecipe(this, 'Recipe', {
-      name: name,
-      version: this.version('ContainerRecipe', name, {
-        platform: props.platform,
-        components,
-        dockerfileTemplate: props.dockerfileTemplate,
-      }),
-      parentImage: props.parentImage ?? 'mcr.microsoft.com/windows/servercore:ltsc2019-amd64',
+      name: this.name,
+      version: this.version,
+      parentImage: props.parentImage,
+      platformOverride: props.platform == 'Linux' ? 'Linux' : undefined,
       components,
       containerType: 'DOCKER',
       targetRepository: {
@@ -82,10 +89,10 @@ export class ContainerRecipe extends ImageBuilderObjectBase {
         repositoryName: props.targetRepository.repositoryName,
       },
       dockerfileTemplateData: props.dockerfileTemplate,
+      tags: props.tags,
     });
 
     this.arn = recipe.attrArn;
-    this.name = name;
   }
 }
 
@@ -101,6 +108,8 @@ export function defaultBaseDockerImage(os: Os) {
     return 'public.ecr.aws/lts/ubuntu:22.04';
   } else if (os.is(Os.LINUX_AMAZON_2)) {
     return 'public.ecr.aws/amazonlinux/amazonlinux:2';
+  } else if (os.is(Os.LINUX_AMAZON_2023)) {
+    return 'public.ecr.aws/amazonlinux/amazonlinux:2023';
   } else {
     throw new Error(`OS ${os.name} not supported for Docker runner image`);
   }

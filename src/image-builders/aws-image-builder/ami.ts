@@ -3,11 +3,13 @@ import { aws_imagebuilder as imagebuilder } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { ImageBuilderComponent } from './builder';
 import { ImageBuilderObjectBase } from './common';
-import { Architecture, Os } from '../../providers/common';
+import { amiRootDevice, Architecture, Os } from '../../providers';
 import { uniqueImageBuilderName } from '../common';
 
 /**
  * Properties for AmiRecipe construct.
+ *
+ * @internal
  */
 interface AmiRecipeProperties {
   /**
@@ -26,9 +28,19 @@ interface AmiRecipeProperties {
   readonly baseAmi: string;
 
   /**
+   * Storage size for the builder.
+   */
+  readonly storageSize?: cdk.Size;
+
+  /**
    * Components to add to target container image.
    */
   readonly components: ImageBuilderComponent[];
+
+  /**
+   * Tags to apply to the recipe and image.
+   */
+  readonly tags: { [key: string]: string };
 }
 
 /**
@@ -39,16 +51,34 @@ interface AmiRecipeProperties {
 export class AmiRecipe extends ImageBuilderObjectBase {
   public readonly arn: string;
   public readonly name: string;
+  public readonly version: string;
 
   constructor(scope: Construct, id: string, props: AmiRecipeProperties) {
     super(scope, id);
-
-    const name = uniqueImageBuilderName(this);
 
     let components = props.components.map(component => {
       return {
         componentArn: component.arn,
       };
+    });
+
+    const blockDeviceMappings = props.storageSize ? [
+      {
+        deviceName: amiRootDevice(this, props.baseAmi).ref,
+        ebs: {
+          volumeSize: props.storageSize.toGibibytes(),
+          deleteOnTermination: true,
+        },
+      },
+    ] : undefined;
+
+    this.name = uniqueImageBuilderName(this);
+    this.version = this.generateVersion('ImageRecipe', this.name, {
+      platform: props.platform,
+      components,
+      parentAmi: props.baseAmi,
+      tags: props.tags,
+      blockDeviceMappings,
     });
 
     let workingDirectory;
@@ -61,19 +91,16 @@ export class AmiRecipe extends ImageBuilderObjectBase {
     }
 
     const recipe = new imagebuilder.CfnImageRecipe(this, 'Recipe', {
-      name: name,
-      version: this.version('ImageRecipe', name, {
-        platform: props.platform,
-        components,
-        parentAmi: props.baseAmi,
-      }),
+      name: this.name,
+      version: this.version,
       parentImage: props.baseAmi,
       components,
       workingDirectory,
+      tags: props.tags,
+      blockDeviceMappings,
     });
 
     this.arn = recipe.attrArn;
-    this.name = name;
   }
 }
 
@@ -109,6 +136,15 @@ export function defaultBaseAmi(scope: Construct, os: Os, architecture: Architect
       resource: 'image',
       account: 'aws',
       resourceName: `amazon-linux-2-${arch}/x.x.x`,
+    });
+  }
+
+  if (os.is(Os.LINUX_AMAZON_2023)) {
+    return stack.formatArn({
+      service: 'imagebuilder',
+      resource: 'image',
+      account: 'aws',
+      resourceName: `amazon-linux-2023-${arch}/x.x.x`,
     });
   }
 

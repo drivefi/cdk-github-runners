@@ -4,7 +4,7 @@ import { Construct } from 'constructs';
 import { AwsImageBuilderRunnerImageBuilderProps } from './aws-image-builder';
 import { CodeBuildRunnerImageBuilderProps } from './codebuild';
 import { RunnerImageComponent } from './components';
-import { Architecture, Os, RunnerAmi, RunnerImage, RunnerVersion } from '../providers/common';
+import { Architecture, Os, RunnerAmi, RunnerImage, RunnerVersion } from '../providers';
 
 /**
  * @internal
@@ -85,7 +85,7 @@ export interface ImageBuilderBaseProps {
   /**
    * The instance type used to build the image.
    *
-   * @default m5.large
+   * @default m6i.large
    */
   readonly instanceType?: ec2.InstanceType;
 
@@ -146,9 +146,20 @@ export interface RunnerImageBuilderProps {
   /**
    * Base image from which Docker runner images will be built.
    *
+   * When using private images from a different account or not on ECR, you may need to include additional setup commands with {@link dockerSetupCommands}.
+   *
    * @default public.ecr.aws/lts/ubuntu:22.04 for Os.LINUX_UBUNTU, public.ecr.aws/amazonlinux/amazonlinux:2 for Os.LINUX_AMAZON_2, mcr.microsoft.com/windows/servercore:ltsc2019-amd64 for Os.WINDOWS
    */
   readonly baseDockerImage?: string;
+
+  /**
+   * Additional commands to run on the build host before starting the Docker runner image build.
+   *
+   * Use this to execute commands such as `docker login` or `aws ecr get-login-password` to pull private base images.
+   *
+   * @default []
+   */
+  readonly dockerSetupCommands?: string[];
 
   /**
    * Base AMI from which runner AMIs will be built.
@@ -233,6 +244,17 @@ export interface RunnerImageBuilderProps {
    * Options specific to AWS Image Builder. Only used when builderType is RunnerImageBuilderType.AWS_IMAGE_BUILDER.
    */
   readonly awsImageBuilderOptions?: AwsImageBuilderRunnerImageBuilderProps;
+
+  /**
+   * Wait for image to finish building during deployment. It's usually best to leave this enabled to ensure everything is ready once deployment is done. However, it can be disabled to speed up deployment in case where you have a lot of image components that can take a long time to build.
+   *
+   * Disabling this option means a finished deployment is not ready to be used. You will have to wait for the image to finish building before the system can be used.
+   *
+   * Disabling this option may also mean any changes to settings or components can take up to a week (default rebuild interval) to take effect.
+   *
+   * @default true
+   */
+  readonly waitOnDeploy?: boolean;
 }
 
 export enum RunnerImageBuilderType {
@@ -279,9 +301,30 @@ export interface IRunnerImageBuilder {
 }
 
 /**
+ * Interface for constructs that build an image that can be used in {@link IRunnerProvider}. The image can be configured by adding or removing components. The image builder can be configured by adding grants or allowing connections.
+ *
+ * An image can be a Docker image or AMI.
+ */
+export interface IConfigurableRunnerImageBuilder extends IRunnerImageBuilder, ec2.IConnectable, iam.IGrantable {
+  /**
+   * Add a component to the image builder. The component will be added to the end of the list of components.
+   *
+   * @param component component to add
+   */
+  addComponent(component: RunnerImageComponent): void;
+
+  /**
+   * Remove a component from the image builder. Removal is done by component name. Multiple components with the same name will all be removed.
+   *
+   * @param component component to remove
+   */
+  removeComponent(component: RunnerImageComponent): void;
+}
+
+/**
  * @internal
  */
-export abstract class RunnerImageBuilderBase extends Construct implements ec2.IConnectable, iam.IGrantable, IRunnerImageBuilder {
+export abstract class RunnerImageBuilderBase extends Construct implements IConfigurableRunnerImageBuilder {
   protected components: RunnerImageComponent[] = [];
 
   protected constructor(scope: Construct, id: string, props?: RunnerImageBuilderProps) {
@@ -299,20 +342,10 @@ export abstract class RunnerImageBuilderBase extends Construct implements ec2.IC
   abstract get connections(): ec2.Connections;
   abstract get grantPrincipal(): iam.IPrincipal;
 
-  /**
-   * Add a component to the image builder. The component will be added to the end of the list of components.
-   *
-   * @param component component to add
-   */
   public addComponent(component: RunnerImageComponent) {
     this.components.push(component);
   }
 
-  /**
-   * Remove a component from the image builder. Removal is done by component name. Multiple components with the same name will all be removed.
-   *
-   * @param component component to remove
-   */
   public removeComponent(component: RunnerImageComponent) {
     this.components = this.components.filter(c => c.name !== component.name);
   }

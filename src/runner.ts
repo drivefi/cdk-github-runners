@@ -29,6 +29,7 @@ import { Secrets } from './secrets';
 import { SetupFunction } from './setup-function';
 import { StatusFunction } from './status-function';
 import { TokenRetrieverFunction } from './token-retriever-function';
+import { singletonLogGroup, SingletonLogType } from './utils';
 import { GithubWebhookHandler } from './webhook';
 
 
@@ -42,6 +43,15 @@ export interface GitHubRunnersProps {
    * @default CodeBuild, Lambda and Fargate runners with all the defaults (no VPC or default account VPC)
    */
   readonly providers?: IRunnerProvider[];
+
+  /**
+   * Whether to require the `self-hosted` label. If `true`, the runner will only start if the workflow job explicitly requests the `self-hosted` label.
+   *
+   * Be careful when setting this to `false`. Avoid setting up providers with generic label requirements like `linux` as they may match workflows that are not meant to run on self-hosted runners.
+   *
+   * @default true
+   */
+  readonly requireSelfHostedLabel?: boolean;
 
   /**
    * VPC used for all management functions. Use this with GitHub Enterprise Server hosted that's inaccessible from outside the VPC.
@@ -286,6 +296,10 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
       ];
     }
 
+    if (this.providers.length == 0) {
+      throw new Error('At least one runner provider is required');
+    }
+
     this.checkIntersectingLabels();
 
     this.orchestrator = this.stateMachine(props);
@@ -293,6 +307,13 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
       orchestrator: this.orchestrator,
       secrets: this.secrets,
       access: this.props?.webhookAccess ?? LambdaAccess.lambdaUrl(),
+      supportedLabels: this.providers.map(p => {
+        return {
+          provider: p.node.path,
+          labels: p.labels,
+        };
+      }),
+      requireSelfHostedLabel: this.props?.requireSelfHostedLabel ?? true,
     });
 
     this.setupUrl = this.setupFunction();
@@ -359,13 +380,12 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
           githubDomainPath: stepfunctions.JsonPath.stringAt('$.runner.domain'),
           ownerPath: stepfunctions.JsonPath.stringAt('$.owner'),
           repoPath: stepfunctions.JsonPath.stringAt('$.repo'),
+          registrationUrl: stepfunctions.JsonPath.stringAt('$.runner.registrationUrl'),
         },
       );
       providerChooser.when(
         stepfunctions.Condition.and(
-          ...provider.labels.map(
-            label => stepfunctions.Condition.isPresent(`$.labels.${label.toLowerCase()}`),
-          ),
+          stepfunctions.Condition.stringEquals('$.provider', provider.node.path),
         ),
         providerTask,
       );
@@ -426,7 +446,7 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
       this,
       'Runner Orchestrator',
       {
-        definition: queueIdleReaperTask.next(runProviders),
+        definitionBody: stepfunctions.DefinitionBody.fromChainable(queueIdleReaperTask.next(runProviders)),
         logs: logOptions,
       },
     );
@@ -452,7 +472,8 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
           ...this.extraLambdaEnv,
         },
         timeout: cdk.Duration.seconds(30),
-        logRetention: logs.RetentionDays.ONE_MONTH,
+        logGroup: singletonLogGroup(this, SingletonLogType.ORCHESTRATOR),
+        logFormat: lambda.LogFormat.JSON,
         ...this.extraLambdaProps,
       },
     );
@@ -475,7 +496,8 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
           ...this.extraLambdaEnv,
         },
         timeout: cdk.Duration.seconds(30),
-        logRetention: logs.RetentionDays.ONE_MONTH,
+        logGroup: singletonLogGroup(this, SingletonLogType.ORCHESTRATOR),
+        logFormat: lambda.LogFormat.JSON,
         ...this.extraLambdaProps,
       },
     );
@@ -505,7 +527,8 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
           ...this.extraLambdaEnv,
         },
         timeout: cdk.Duration.minutes(3),
-        logRetention: logs.RetentionDays.ONE_MONTH,
+        logGroup: singletonLogGroup(this, SingletonLogType.SETUP),
+        logFormat: lambda.LogFormat.JSON,
         ...this.extraLambdaProps,
       },
     );
@@ -567,7 +590,8 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
           ...this.extraLambdaEnv,
         },
         timeout: cdk.Duration.minutes(3),
-        logRetention: logs.RetentionDays.ONE_MONTH,
+        logGroup: singletonLogGroup(this, SingletonLogType.SETUP),
+        logFormat: lambda.LogFormat.JSON,
         ...this.extraLambdaProps,
       },
     );
@@ -610,7 +634,8 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
         GITHUB_PRIVATE_KEY_SECRET_ARN: this.secrets.githubPrivateKey.secretArn,
         ...this.extraLambdaEnv,
       },
-      logRetention: logs.RetentionDays.ONE_MONTH,
+      logGroup: singletonLogGroup(this, SingletonLogType.ORCHESTRATOR),
+      logFormat: lambda.LogFormat.JSON,
       timeout: cdk.Duration.minutes(5),
       ...this.extraLambdaProps,
     });
@@ -749,5 +774,94 @@ export class GitHubRunners extends Construct implements ec2.IConnectable {
       ),
     );
     return topic;
+  }
+
+  /**
+   * Creates CloudWatch Logs Insights saved queries that can be used to debug issues with the runners.
+   *
+   * * "Webhook errors" helps diagnose configuration issues with GitHub integration
+   * * "Ignored webhook" helps understand why runners aren't started
+   * * "Ignored jobs based on labels" helps debug label matching issues
+   * * "Webhook started runners" helps understand which runners were started
+   */
+  public createLogsInsightsQueries() {
+    new logs.QueryDefinition(this, 'Webhook errors', {
+      queryDefinitionName: 'GitHub Runners/Webhook errors',
+      logGroups: [this.webhook.handler.logGroup],
+      queryString: new logs.QueryString({
+        filterStatements: [
+          `strcontains(@logStream, "${this.webhook.handler.functionName}")`,
+          'level = "ERROR"',
+        ],
+        sort: '@timestamp desc',
+        limit: 100,
+      }),
+    });
+
+    new logs.QueryDefinition(this, 'Orchestration errors', {
+      queryDefinitionName: 'GitHub Runners/Orchestration errors',
+      logGroups: [singletonLogGroup(this, SingletonLogType.ORCHESTRATOR)],
+      queryString: new logs.QueryString({
+        filterStatements: [
+          'level = "ERROR"',
+        ],
+        sort: '@timestamp desc',
+        limit: 100,
+      }),
+    });
+
+    new logs.QueryDefinition(this, 'Runner image build errors', {
+      queryDefinitionName: 'GitHub Runners/Runner image build errors',
+      logGroups: [singletonLogGroup(this, SingletonLogType.RUNNER_IMAGE_BUILD)],
+      queryString: new logs.QueryString({
+        filterStatements: [
+          'strcontains(message, "error") or strcontains(message, "ERROR") or strcontains(message, "Error") or level = "ERROR"',
+        ],
+        sort: '@timestamp desc',
+        limit: 100,
+      }),
+    });
+
+    new logs.QueryDefinition(this, 'Ignored webhooks', {
+      queryDefinitionName: 'GitHub Runners/Ignored webhooks',
+      logGroups: [this.webhook.handler.logGroup],
+      queryString: new logs.QueryString({
+        fields: ['@timestamp', 'message.notice'],
+        filterStatements: [
+          `strcontains(@logStream, "${this.webhook.handler.functionName}")`,
+          'strcontains(message.notice, "Ignoring")',
+        ],
+        sort: '@timestamp desc',
+        limit: 100,
+      }),
+    });
+
+    new logs.QueryDefinition(this, 'Ignored jobs based on labels', {
+      queryDefinitionName: 'GitHub Runners/Ignored jobs based on labels',
+      logGroups: [this.webhook.handler.logGroup],
+      queryString: new logs.QueryString({
+        fields: ['@timestamp', 'message.notice'],
+        filterStatements: [
+          `strcontains(@logStream, "${this.webhook.handler.functionName}")`,
+          'strcontains(message.notice, "Ignoring labels")',
+        ],
+        sort: '@timestamp desc',
+        limit: 100,
+      }),
+    });
+
+    new logs.QueryDefinition(this, 'Webhook started runners', {
+      queryDefinitionName: 'GitHub Runners/Webhook started runners',
+      logGroups: [this.webhook.handler.logGroup],
+      queryString: new logs.QueryString({
+        fields: ['@timestamp', 'message.sfnInput.jobUrl', 'message.sfnInput.labels', 'message.sfnInput.provider'],
+        filterStatements: [
+          `strcontains(@logStream, "${this.webhook.handler.functionName}")`,
+          'message.sfnInput.jobUrl like /http.*/',
+        ],
+        sort: '@timestamp desc',
+        limit: 100,
+      }),
+    });
   }
 }

@@ -1,12 +1,41 @@
+import {
+  ImagebuilderClient,
+  ListComponentsCommand,
+  ListComponentsResponse,
+  ListContainerRecipesCommand,
+  ListContainerRecipesResponse,
+  ListImageRecipesCommand,
+  ListImageRecipesResponse,
+  ListWorkflowsCommand,
+  ListWorkflowsResponse,
+} from '@aws-sdk/client-imagebuilder';
 import * as AWSLambda from 'aws-lambda';
-import * as AWS from 'aws-sdk';
 import { inc, maxSatisfying } from 'semver';
 import { customResourceRespond } from '../../lambda-helpers';
 
-const ib = new AWS.Imagebuilder();
+const ib = new ImagebuilderClient();
+
+/**
+ * Exported for unit tests.
+ * @internal
+ */
+export function increaseVersion(allVersions: string[]) {
+  let version = maxSatisfying(allVersions, '>=0.0.0');
+  if (version === null) {
+    version = '1.0.0';
+  }
+  console.log(`Found versions ${allVersions} -- latest is ${version}`);
+
+  version = inc(version, 'patch');
+  if (version === null) {
+    throw new Error('Unable to bump version');
+  }
+
+  return version;
+}
 
 export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent, context: AWSLambda.Context) {
-  console.log(JSON.stringify({ ...event, ResponseURL: '...' }));
+  console.log({ ...event, ResponseURL: '...' });
 
   try {
     const objectType = event.ResourceProperties.ObjectType;
@@ -15,49 +44,62 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
     switch (event.RequestType) {
       case 'Create':
       case 'Update':
-        let version: string | null = '1.0.0';
         let allVersions: string[] = [];
         try {
           switch (objectType) {
             case 'Component': {
-              let result: AWS.Imagebuilder.ListComponentsResponse = {};
+              let result: ListComponentsResponse = {};
               do {
-                result = await ib.listComponents({
+                result = await ib.send(new ListComponentsCommand({
                   filters: [{
                     name: 'name',
                     values: [objectName],
                   }],
                   nextToken: result.nextToken,
-                }).promise();
+                }));
                 allVersions = allVersions.concat(result.componentVersionList!.map(i => i.version || '1.0.0'));
               } while (result.nextToken);
               break;
             }
             case 'ImageRecipe': {
-              let result: AWS.Imagebuilder.ListImageRecipesResponse = {};
+              let result: ListImageRecipesResponse = {};
               do {
-                result = await ib.listImageRecipes({
+                result = await ib.send(new ListImageRecipesCommand({
                   filters: [{
                     name: 'name',
                     values: [objectName],
                   }],
                   nextToken: result.nextToken,
-                }).promise();
+                }));
                 allVersions = allVersions.concat(result.imageRecipeSummaryList!.map(i => i.arn?.split('/').pop() || '1.0.0'));
               } while (result.nextToken);
               break;
             }
             case 'ContainerRecipe': {
-              let result: AWS.Imagebuilder.ListContainerRecipesResponse = {};
+              let result: ListContainerRecipesResponse = {};
               do {
-                result = await ib.listContainerRecipes({
+                result = await ib.send(new ListContainerRecipesCommand({
                   filters: [{
                     name: 'name',
                     values: [objectName],
                   }],
                   nextToken: result.nextToken,
-                }).promise();
+                }));
                 allVersions = allVersions.concat(result.containerRecipeSummaryList!.map(i => i.arn?.split('/').pop() || '1.0.0'));
+              } while (result.nextToken);
+              break;
+            }
+            case 'Workflow': {
+              let result: ListWorkflowsResponse = {};
+              do {
+                result = await ib.send(new ListWorkflowsCommand({
+                  filters: [{
+                    name: 'name',
+                    values: [objectName],
+                  }],
+                  nextToken: result.nextToken,
+                }));
+                allVersions = allVersions.concat(result.workflowVersionList!.map(i => i.arn?.split('/').pop() || '1.0.0'));
               } while (result.nextToken);
               break;
             }
@@ -70,16 +112,7 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
           }
         }
 
-        version = maxSatisfying(allVersions, '>=0.0.0');
-        if (version === null) {
-          version = '1.0.0';
-        }
-        console.log(`Found versions ${allVersions} -- latest is ${version}`);
-
-        version = inc(version, 'patch');
-        if (version === null) {
-          throw new Error('Unable to bump version');
-        }
+        const version = increaseVersion(allVersions);
         await customResourceRespond(event, 'SUCCESS', 'OK', version, {});
 
         break;

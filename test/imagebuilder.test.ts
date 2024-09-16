@@ -3,13 +3,17 @@ import { aws_ec2 as ec2 } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import {
   AmiBuilder,
-  Architecture, CodeBuildRunnerProvider,
+  Architecture,
+  CodeBuildRunnerProvider,
   ContainerImageBuilder,
   Ec2RunnerProvider,
-  FargateRunnerProvider, LambdaRunnerProvider,
+  FargateRunnerProvider,
+  GitHubRunners,
+  LambdaRunnerProvider,
   Os,
   RunnerImageBuilder,
-  RunnerImageBuilderType, RunnerImageComponent,
+  RunnerImageBuilderType,
+  RunnerImageComponent,
 } from '../src';
 
 test('AMI builder matching instance type (DEPRECATED)', () => {
@@ -24,7 +28,7 @@ test('AMI builder matching instance type (DEPRECATED)', () => {
       architecture: Architecture.ARM64,
       vpc,
     });
-  }).toThrowError('Builder architecture (ARM64) doesn\'t match selected instance type (m5.large / x86_64)');
+  }).toThrowError('Builder architecture (ARM64) doesn\'t match selected instance type (m6i.large / x86_64)');
 });
 
 test('AMI builder matching instance type', () => {
@@ -40,7 +44,7 @@ test('AMI builder matching instance type', () => {
       vpc,
       builderType: RunnerImageBuilderType.AWS_IMAGE_BUILDER,
     });
-  }).toThrowError('Builder architecture (ARM64) doesn\'t match selected instance type (m5.large / x86_64)');
+  }).toThrowError('Builder architecture (ARM64) doesn\'t match selected instance type (m6i.large / x86_64)');
 });
 
 test('AMI builder supported OS', () => {
@@ -221,7 +225,7 @@ test('CodeBuild default image builder has GitHub Runner and Docker-in-Docker', (
         'Fn::Join': [
           '',
           Match.arrayWith([
-            Match.stringLikeRegexp('component[0-9]+-Docker-in-Docker.sh'),
+            Match.stringLikeRegexp('component[0-9]+-Docker.sh'),
           ]),
         ],
       },
@@ -301,4 +305,20 @@ test('Lambda default image builder has GitHub Runner and Lambda entry point', ()
       },
     },
   });
+});
+
+test('Unused builder doesn\'t throw exceptions', () => {
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'test');
+
+  const vpc = new ec2.Vpc(stack, 'vpc');
+
+  LambdaRunnerProvider.imageBuilder(stack, 'codebuild builder');
+  Ec2RunnerProvider.imageBuilder(stack, 'ec2 image builder', { vpc });
+
+  new GitHubRunners(stack, 'runners', {
+    providers: [new LambdaRunnerProvider(stack, 'p1' /* not using builder on purpose */)],
+  }).failedImageBuildsTopic();
+
+  app.synth();
 });

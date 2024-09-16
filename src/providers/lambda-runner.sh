@@ -1,12 +1,26 @@
 #!/bin/bash
 
-set -e -u -o pipefail
+set -euo pipefail
 
-# cleanup
-find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf '{}' \;
+# workaround for "Cannot get required symbol EVP_rc2_cbc from libssl"
+# lambda docker image for node.js comes with stripped down libssl.so pushed in LD_LIBRARY_PATH
+if [ -f /var/lang/lib/libssl.so ]; then
+  export LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
+fi
+
+# extract parameters
+OWNER=$(echo "$1" | jq -r .owner)
+REPO=$(echo "$1" | jq -r .repo)
+GITHUB_DOMAIN=$(echo "$1" | jq -r .githubDomain)
+RUNNER_TOKEN=$(echo "$1" | jq -r .token)
+RUNNER_NAME=$(echo "$1" | jq -r .runnerName)
+RUNNER_LABEL=$(echo "$1" | jq -r .label)
+REGISTRATION_URL=$(echo "$1" | jq -r .registrationUrl)
+
 # copy runner code (it needs a writable directory)
 cp -r /home/runner /tmp/
 cd /tmp/runner
+
 # setup home directory
 mkdir /tmp/home
 export HOME=/tmp/home

@@ -1,7 +1,6 @@
-import * as AWS from 'aws-sdk';
-import { AWSError } from 'aws-sdk/lib/error';
+import { LambdaClient, UpdateFunctionCodeCommand, ResourceConflictException } from '@aws-sdk/client-lambda';
 
-const lambda = new AWS.Lambda();
+const lambda = new LambdaClient();
 
 interface Input {
   readonly lambdaName: string;
@@ -14,18 +13,18 @@ function sleep(ms: number) {
 }
 
 export async function handler(event: Input) {
-  console.log(JSON.stringify(event));
+  console.log(event);
 
   while (true) {
     try {
-      await lambda.updateFunctionCode({
+      await lambda.send(new UpdateFunctionCodeCommand({
         FunctionName: event.lambdaName,
         ImageUri: `${event.repositoryUri}:${event.repositoryTag}`,
         Publish: true,
-      }).promise();
+      }));
       break;
     } catch (e) {
-      if ((<AWSError>e).code == 'ResourceConflictException') {
+      if (e instanceof ResourceConflictException) {
         // keep trying if function is already being updated by CloudFormation
         // this can happen if we update some settings on the function and the image code at the same time
         await sleep(10000);

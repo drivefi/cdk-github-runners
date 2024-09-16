@@ -1,5 +1,6 @@
 import * as path from 'path';
 import {
+  Annotations,
   aws_codebuild as codebuild,
   aws_ec2 as ec2,
   aws_iam as iam,
@@ -31,7 +32,7 @@ export interface CodeBuildRunnerProviderProps extends RunnerProviderProps {
   /**
    * Runner image builder used to build Docker images containing GitHub Runner and all requirements.
    *
-   * The image builder must contain the {@link RunnerImageComponent.dockerInDocker} component unless `dockerInDocker` is set to false.
+   * The image builder must contain the {@link RunnerImageComponent.docker} component unless `dockerInDocker` is set to false.
    *
    * The image builder determines the OS and architecture of the runner.
    *
@@ -153,7 +154,13 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
   public static readonly LINUX_ARM64_DOCKERFILE_PATH = path.join(__dirname, '..', '..', 'assets', 'docker-images', 'codebuild', 'linux-arm64');
 
   /**
-   * Create new image builder that builds CodeBuild specific runner images using Ubuntu.
+   * Create new image builder that builds CodeBuild specific runner images.
+   *
+   * You can customize the OS, architecture, VPC, subnet, security groups, etc. by passing in props.
+   *
+   * You can add components to the image builder by calling `imageBuilder.addComponent()`.
+   *
+   * The default OS is Ubuntu running on x64 architecture.
    *
    * Included components:
    *  * `RunnerImageComponent.requiredPackages()`
@@ -161,7 +168,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
    *  * `RunnerImageComponent.git()`
    *  * `RunnerImageComponent.githubCli()`
    *  * `RunnerImageComponent.awsCli()`
-   *  * `RunnerImageComponent.dockerInDocker()`
+   *  * `RunnerImageComponent.docker()`
    *  * `RunnerImageComponent.githubRunner()`
    */
   public static imageBuilder(scope: Construct, id: string, props?: RunnerImageBuilderProps) {
@@ -174,7 +181,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
         RunnerImageComponent.git(),
         RunnerImageComponent.githubCli(),
         RunnerImageComponent.awsCli(),
-        RunnerImageComponent.dockerInDocker(),
+        RunnerImageComponent.docker(),
         RunnerImageComponent.githubRunner(props?.runnerVersion ?? RunnerVersion.latest()),
       ],
       ...props,
@@ -220,6 +227,18 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
   constructor(scope: Construct, id: string, props?: CodeBuildRunnerProviderProps) {
     super(scope, id, props);
 
+    // warn against isolated networks
+    if (props?.subnetSelection?.subnetType == ec2.SubnetType.PRIVATE_ISOLATED) {
+      Annotations.of(this).addWarning('Private isolated subnets cannot pull from public ECR and VPC endpoint is not supported yet. ' +
+        'See https://github.com/aws/containers-roadmap/issues/1160');
+    }
+
+    // error out on no-nat networks because the build will hang
+    if (props?.subnetSelection?.subnetType == ec2.SubnetType.PUBLIC) {
+      Annotations.of(this).addError('Public subnets do not work with CodeBuild as it cannot be assigned an IP. ' +
+        'See https://docs.aws.amazon.com/codebuild/latest/userguide/vpc-support.html#best-practices-for-vpcs');
+    }
+
     this.labels = this.labelsFromProperties('codebuild', props?.label, props?.labels);
     this.vpc = props?.vpc;
     if (props?.securityGroup) {
@@ -246,6 +265,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
           OWNER: 'unspecified',
           REPO: 'unspecified',
           GITHUB_DOMAIN: 'github.com',
+          REGISTRATION_URL: 'unspecified',
         },
       },
       phases: {
@@ -254,7 +274,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
             this.dind ? 'nohup dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &' : '',
             this.dind ? 'timeout 15 sh -c "until docker info; do echo .; sleep 1; done"' : '',
             'if [ "${RUNNER_VERSION}" = "latest" ]; then RUNNER_FLAGS=""; else RUNNER_FLAGS="--disableupdate"; fi',
-            'sudo -Hu runner /home/runner/config.sh --unattended --url "https://${GITHUB_DOMAIN}/${OWNER}/${REPO}" --token "${RUNNER_TOKEN}" --ephemeral --work _work --labels "${RUNNER_LABEL},cdkghr:started:`date +%s`" ${RUNNER_FLAGS} --name "${RUNNER_NAME}"',
+            'sudo -Hu runner /home/runner/config.sh --unattended --url "${REGISTRATION_URL}" --token "${RUNNER_TOKEN}" --ephemeral --work _work --labels "${RUNNER_LABEL},cdkghr:started:`date +%s`" ${RUNNER_FLAGS} --name "${RUNNER_NAME}"',
           ],
         },
         build: {
@@ -274,7 +294,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
       buildSpec.phases.install.commands = [
         'cd \\actions',
         'if (${Env:RUNNER_VERSION} -eq "latest") { $RunnerFlags = "" } else { $RunnerFlags = "--disableupdate" }',
-        './config.cmd --unattended --url "https://${Env:GITHUB_DOMAIN}/${Env:OWNER}/${Env:REPO}" --token "${Env:RUNNER_TOKEN}" --ephemeral --work _work --labels "${Env:RUNNER_LABEL},cdkghr:started:$(Get-Date -UFormat %s)" ${RunnerFlags} --name "${Env:RUNNER_NAME}"',
+        './config.cmd --unattended --url "${Env:REGISTRATION_URL}" --token "${Env:RUNNER_TOKEN}" --ephemeral --work _work --labels "${Env:RUNNER_LABEL},cdkghr:started:$(Get-Date -UFormat %s)" ${RunnerFlags} --name "${Env:RUNNER_NAME}"',
       ];
       buildSpec.phases.build.commands = [
         'cd \\actions',
@@ -286,7 +306,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
 
     // choose build image
     let buildImage: codebuild.IBuildImage | undefined;
-    if (image.os.is(Os.LINUX) || image.os.is(Os.LINUX_UBUNTU) || image.os.is(Os.LINUX_AMAZON_2)) {
+    if (image.os.isIn(Os._ALL_LINUX_VERSIONS)) {
       if (image.architecture.is(Architecture.X86_64)) {
         buildImage = codebuild.LinuxBuildImage.fromEcrRepository(image.imageRepository, image.imageTag);
       } else if (image.architecture.is(Architecture.ARM64)) {
@@ -336,6 +356,10 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
     );
 
     this.grantPrincipal = this.project.grantPrincipal;
+
+    // allow SSM Session Manager access
+    // this.project.role?.addToPrincipalPolicy(MINIMAL_SSM_SESSION_MANAGER_POLICY_STATEMENT);
+    // step function won't let us pass `debugSessionEnabled: true` unless we use batch, so we can't use this
   }
 
   /**
@@ -346,7 +370,7 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
    * @param parameters workflow job details
    */
   getStepFunctionTask(parameters: RunnerRuntimeParameters): stepfunctions.IChainable {
-    const step = new stepfunctions_tasks.CodeBuildStartBuild(
+    return new stepfunctions_tasks.CodeBuildStartBuild(
       this,
       this.labels.join(', '),
       {
@@ -377,11 +401,13 @@ export class CodeBuildRunnerProvider extends BaseProvider implements IRunnerProv
             type: codebuild.BuildEnvironmentVariableType.PLAINTEXT,
             value: parameters.repoPath,
           },
+          REGISTRATION_URL: {
+            type: codebuild.BuildEnvironmentVariableType.PLAINTEXT,
+            value: parameters.registrationUrl,
+          },
         },
       },
     );
-
-    return step;
   }
 
   grantStateMachine(_: iam.IGrantable) {

@@ -3,6 +3,7 @@ import {
   aws_ec2 as ec2,
   aws_ecr as ecr,
   aws_iam as iam,
+  aws_lambda as lambda,
   aws_logs as logs,
   aws_stepfunctions as stepfunctions,
   CustomResource,
@@ -10,7 +11,7 @@ import {
 } from 'aws-cdk-lib';
 import { Construct, IConstruct } from 'constructs';
 import { AmiRootDeviceFunction } from './ami-root-device-function';
-import { singletonLambda } from '../utils';
+import { singletonLambda, singletonLogGroup, SingletonLogType } from '../utils';
 
 /**
  * Defines desired GitHub Actions runner version.
@@ -114,7 +115,7 @@ export class Os {
   /**
   * Linux
   *
-  * @deprecated use {@link LINUX_UBUNTU} or {@link LINUX_AMAZON_2}
+  * @deprecated use {@link LINUX_UBUNTU} or {@link LINUX_AMAZON_2} or {@link LINUX_AMAZON_2023}
   */
   public static readonly LINUX = Os.of('Linux');
 
@@ -127,6 +128,16 @@ export class Os {
    * Amazon Linux 2
    */
   public static readonly LINUX_AMAZON_2 = Os.of('Amazon Linux 2');
+
+  /**
+   * Amazon Linux 2023
+   */
+  public static readonly LINUX_AMAZON_2023 = Os.of('Amazon Linux 2023');
+
+  /**
+   * @internal
+   */
+  public static readonly _ALL_LINUX_VERSIONS = [Os.LINUX, Os.LINUX_UBUNTU, Os.LINUX_AMAZON_2, Os.LINUX_AMAZON_2023];
 
   /**
   * Windows
@@ -296,7 +307,7 @@ export interface RunnerProviderProps {
  * Workflow job parameters as parsed from the webhook event. Pass these into your runner executor and run something like:
  *
  * ```sh
- * ./config.sh --unattended --url "https://${GITHUB_DOMAIN}/${OWNER}/${REPO}" --token "${RUNNER_TOKEN}" --ephemeral --work _work --labels "${RUNNER_LABEL}" --name "${RUNNER_NAME}" --disableupdate
+ * ./config.sh --unattended --url "{REGISTRATION_URL}" --token "${RUNNER_TOKEN}" --ephemeral --work _work --labels "${RUNNER_LABEL}" --name "${RUNNER_NAME}" --disableupdate
  * ```
  *
  * All parameters are specified as step function paths and therefore must be used only in step function task parameters.
@@ -326,6 +337,12 @@ export interface RunnerRuntimeParameters {
    * Path to repository name.
    */
   readonly repoPath: string;
+
+  /**
+   * Repository or organization URL to register runner at.
+   */
+  readonly registrationUrl: string;
+
 }
 
 /**
@@ -468,6 +485,8 @@ export interface IRunnerProvider extends ec2.IConnectable, iam.IGrantable, ICons
 export abstract class BaseProvider extends Construct {
   protected constructor(scope: Construct, id: string, _props?: RunnerProviderProps) {
     super(scope, id);
+
+    cdk.Tags.of(this).add('GitHubRunners:Provider', this.node.path);
   }
 
   protected labelsFromProperties(defaultLabel: string, propsLabel: string | undefined, propsLabels: string[] | undefined): string[] {
@@ -488,32 +507,34 @@ export abstract class BaseProvider extends Construct {
 /**
  * Use custom resource to determine the root device name of a given AMI, Launch Template, or SSM parameter pointing to AMI.
  *
+ * TODO move somewhere more common as it's used by both providers and AMI builder now
+ *
  * @internal
  */
 export function amiRootDevice(scope: Construct, ami?: string) {
   const crHandler = singletonLambda(AmiRootDeviceFunction, scope, 'AMI Root Device Reader', {
-    description: 'Custom resource handler that triggers CodeBuild to build runner images, and cleans-up images on deletion',
+    description: 'Custom resource handler that discovers the boot drive device name for a given AMI',
     timeout: cdk.Duration.minutes(1),
-    logRetention: logs.RetentionDays.ONE_MONTH,
+    logGroup: singletonLogGroup(scope, SingletonLogType.RUNNER_IMAGE_BUILD),
+    logFormat: lambda.LogFormat.JSON,
     initialPolicy: [
       new iam.PolicyStatement({
         actions: [
           'ssm:GetParameter',
           'ec2:DescribeImages',
           'ec2:DescribeLaunchTemplateVersions',
+          'imagebuilder:GetImage',
         ],
         resources: ['*'],
       }),
     ],
   });
 
-  const cr = new CustomResource(scope, 'AMI Root Device', {
+  return new CustomResource(scope, 'AMI Root Device', {
     serviceToken: crHandler.functionArn,
     resourceType: 'Custom::AmiRootDevice',
     properties: {
       Ami: ami ?? '',
     },
   });
-
-  return cr.ref;
 }

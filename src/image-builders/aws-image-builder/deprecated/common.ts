@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { aws_ec2 as ec2, aws_events as events, aws_iam as iam, aws_imagebuilder as imagebuilder, aws_logs as logs, RemovalPolicy } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { Architecture, Os, RunnerAmi, RunnerImage, RunnerVersion } from '../../../providers/common';
+import { Architecture, Os, RunnerAmi, RunnerImage, RunnerVersion } from '../../../providers';
 import { ImageBuilderBaseProps, IRunnerImageBuilder, uniqueImageBuilderName } from '../../common';
 import { ImageBuilderComponent } from '../builder';
 
@@ -46,7 +46,7 @@ export abstract class ImageBuilderBase extends Construct implements IRunnerImage
     // platform
     if (this.os.is(Os.WINDOWS)) {
       this.platform = 'Windows';
-    } else if (this.os.is(Os.LINUX) || this.os.is(Os.LINUX_UBUNTU) || this.os.is(Os.LINUX_UBUNTU)) {
+    } else if (this.os.isIn(Os._ALL_LINUX_VERSIONS)) {
       this.platform = 'Linux';
     } else {
       throw new Error(`Unsupported OS: ${this.os.name}.`);
@@ -70,7 +70,7 @@ export abstract class ImageBuilderBase extends Construct implements IRunnerImage
     }
 
     // instance type
-    this.instanceType = props?.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE);
+    this.instanceType = props?.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.M6I, ec2.InstanceSize.LARGE);
     if (!this.architecture.instanceTypeMatch(this.instanceType)) {
       throw new Error(`Builder architecture (${this.architecture.name}) doesn't match selected instance type (${this.instanceType} / ${this.instanceType.architecture})`);
     }

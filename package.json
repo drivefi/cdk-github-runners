@@ -13,18 +13,16 @@
     "bundle:delete-failed-runner.lambda:watch": "npx projen bundle:delete-failed-runner.lambda:watch",
     "bundle:idle-runner-repear.lambda": "npx projen bundle:idle-runner-repear.lambda",
     "bundle:idle-runner-repear.lambda:watch": "npx projen bundle:idle-runner-repear.lambda:watch",
-    "bundle:image-builders/aws-image-builder/delete-ami.lambda": "npx projen bundle:image-builders/aws-image-builder/delete-ami.lambda",
-    "bundle:image-builders/aws-image-builder/delete-ami.lambda:watch": "npx projen bundle:image-builders/aws-image-builder/delete-ami.lambda:watch",
+    "bundle:image-builders/aws-image-builder/delete-resources.lambda": "npx projen bundle:image-builders/aws-image-builder/delete-resources.lambda",
+    "bundle:image-builders/aws-image-builder/delete-resources.lambda:watch": "npx projen bundle:image-builders/aws-image-builder/delete-resources.lambda:watch",
     "bundle:image-builders/aws-image-builder/filter-failed-builds.lambda": "npx projen bundle:image-builders/aws-image-builder/filter-failed-builds.lambda",
     "bundle:image-builders/aws-image-builder/filter-failed-builds.lambda:watch": "npx projen bundle:image-builders/aws-image-builder/filter-failed-builds.lambda:watch",
-    "bundle:image-builders/aws-image-builder/reaper.lambda": "npx projen bundle:image-builders/aws-image-builder/reaper.lambda",
-    "bundle:image-builders/aws-image-builder/reaper.lambda:watch": "npx projen bundle:image-builders/aws-image-builder/reaper.lambda:watch",
     "bundle:image-builders/aws-image-builder/versioner.lambda": "npx projen bundle:image-builders/aws-image-builder/versioner.lambda",
     "bundle:image-builders/aws-image-builder/versioner.lambda:watch": "npx projen bundle:image-builders/aws-image-builder/versioner.lambda:watch",
+    "bundle:image-builders/build-image.lambda": "npx projen bundle:image-builders/build-image.lambda",
+    "bundle:image-builders/build-image.lambda:watch": "npx projen bundle:image-builders/build-image.lambda:watch",
     "bundle:providers/ami-root-device.lambda": "npx projen bundle:providers/ami-root-device.lambda",
     "bundle:providers/ami-root-device.lambda:watch": "npx projen bundle:providers/ami-root-device.lambda:watch",
-    "bundle:providers/build-image.lambda": "npx projen bundle:providers/build-image.lambda",
-    "bundle:providers/build-image.lambda:watch": "npx projen bundle:providers/build-image.lambda:watch",
     "bundle:providers/update-lambda.lambda": "npx projen bundle:providers/update-lambda.lambda",
     "bundle:providers/update-lambda.lambda:watch": "npx projen bundle:providers/update-lambda.lambda:watch",
     "bundle:setup.lambda": "npx projen bundle:setup.lambda",
@@ -72,52 +70,59 @@
     "organization": false
   },
   "devDependencies": {
-    "@aws-sdk/types": "^3.341.0",
+    "@aws-sdk/client-cloudformation": "^3.651.1",
+    "@aws-sdk/client-codebuild": "^3.651.1",
+    "@aws-sdk/client-ec2": "^3.651.1",
+    "@aws-sdk/client-ecr": "^3.651.1",
+    "@aws-sdk/client-imagebuilder": "^3.651.1",
+    "@aws-sdk/client-lambda": "^3.651.1",
+    "@aws-sdk/client-secrets-manager": "^3.651.1",
+    "@aws-sdk/client-sfn": "^3.651.1",
+    "@aws-sdk/client-sns": "^3.651.1",
+    "@aws-sdk/client-ssm": "^3.651.1",
     "@octokit/auth-app": "^4.0.13",
-    "@octokit/core": "^4.2.1",
+    "@octokit/core": "^4.2.4",
     "@octokit/request-error": "^3.0.3",
-    "@octokit/rest": "^19.0.11",
+    "@octokit/rest": "^19.0.13",
     "@sveltejs/vite-plugin-svelte": "^1.0.1",
     "@tsconfig/svelte": "^3.0.0",
-    "@types/aws-lambda": "^8.10.115",
-    "@types/jest": "^27",
-    "@types/node": "^16",
-    "@types/semver": "^7.5.0",
-    "@typescript-eslint/eslint-plugin": "^5",
-    "@typescript-eslint/parser": "^5",
+    "@types/aws-lambda": "^8.10.145",
+    "@types/jest": "^29",
+    "@types/node": "^18",
+    "@types/semver": "^7.5.8",
+    "@typescript-eslint/eslint-plugin": "^7",
+    "@typescript-eslint/parser": "^7",
     "aws-cdk": "^2",
-    "aws-cdk-lib": "2.50.0",
-    "aws-sdk": "^2.1386.0",
+    "aws-cdk-lib": "2.123.0",
     "bootstrap": "^5.2.0",
+    "commit-and-tag-version": "^12",
     "constructs": "10.0.5",
-    "esbuild": "^0.17.19",
+    "esbuild": "^0.23.1",
     "eslint": "^8",
-    "eslint-import-resolver-node": "^0.3.7",
     "eslint-import-resolver-typescript": "^2.7.1",
-    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-import": "^2.30.0",
     "eslint-plugin-svelte": "^2.29.0",
-    "jest": "^27",
+    "jest": "^29",
     "jest-junit": "^15",
-    "jsii": "5.0.x",
-    "jsii-diff": "^1.82.0",
-    "jsii-docgen": "^6.3.27",
-    "jsii-pacmak": "^1.82.0",
-    "npm-check-updates": "^16",
-    "projen": "^0.71.75",
+    "jsii": "5.3.x",
+    "jsii-diff": "^1.103.1",
+    "jsii-docgen": "^10.5.0",
+    "jsii-pacmak": "^1.103.1",
+    "jsii-rosetta": "5.3.x",
+    "projen": "^0.87.2",
     "sass": "^1.54.0",
-    "semver": "^7.5.1",
-    "standard-version": "^9",
+    "semver": "^7.6.3",
     "svelte": "^3.49.0",
     "svelte-check": "^2.8.0",
     "svelte-preprocess": "^4.10.7",
-    "ts-jest": "^27",
-    "ts-node": "^10.9.1",
+    "ts-jest": "^29",
+    "ts-node": "^10.9.2",
     "typescript": "4.9.x",
     "vite": "^4.0.0",
     "vite-plugin-singlefile": "^0.13.5"
   },
   "peerDependencies": {
-    "aws-cdk-lib": "^2.50.0",
+    "aws-cdk-lib": "^2.123.0",
     "constructs": "^10.0.5"
   },
   "keywords": [
@@ -134,11 +139,15 @@
   ],
   "main": "lib/index.js",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "version": "0.0.0",
   "jest": {
+    "coverageProvider": "v8",
     "testMatch": [
-      "<rootDir>/src/**/__tests__/**/*.ts?(x)",
-      "<rootDir>/(test|src)/**/*(*.)@(spec|test).ts?(x)"
+      "<rootDir>/@(src|test)/**/*(*.)@(spec|test).ts?(x)",
+      "<rootDir>/@(src|test)/**/__tests__/**/*.ts?(x)"
     ],
     "clearMocks": true,
     "collectCoverage": true,
@@ -168,11 +177,13 @@
         }
       ]
     ],
-    "preset": "ts-jest",
-    "globals": {
-      "ts-jest": {
-        "tsconfig": "tsconfig.dev.json"
-      }
+    "transform": {
+      "^.+\\.[t]sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.dev.json"
+        }
+      ]
     }
   },
   "types": "lib/index.d.ts",
@@ -204,5 +215,6 @@
       "rootDir": "src"
     }
   },
+  "funding": "https://github.com/sponsors/CloudSnorkel",
   "//": "~~ Generated by projen. To modify, edit .projenrc.js and run \"npx projen\"."
 }

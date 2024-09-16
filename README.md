@@ -10,11 +10,11 @@
 
 Use this CDK construct to create ephemeral [self-hosted GitHub runners][1] on-demand inside your AWS account.
 
-* Easy to configure GitHub integration with a web-based interface
-* Customizable runners with decent defaults
-* Multiple runner configurations controlled by labels
-* Everything fully hosted in your account
-* Automatically updated build environment with latest runner version
+* 🧩 Easy to configure GitHub integration with a web-based interface
+* 🧠 Customizable runners with decent defaults
+* 🏃🏻 Multiple runner configurations controlled by labels
+* 🔐 Everything fully hosted in your account
+* 🔃 Automatically updated build environment with latest runner version
 
 Self-hosted runners in AWS are useful when:
 
@@ -65,9 +65,14 @@ You can also create your own provider by implementing `IRunnerProvider`.
    ```
    ### Use
    ```python
+   from aws_cdk import App, Stack
    from cloudsnorkel.cdk_github_runners import GitHubRunners
    
-   GitHubRunners(self, "runners")
+   app = App()
+   stack = Stack(app, "github-runners")
+   GitHubRunners(stack, "runners")
+   
+   app.synth()
    ```
    </details>
    <details><summary>TypeScript or JavaScript</summary>
@@ -79,9 +84,14 @@ You can also create your own provider by implementing `IRunnerProvider`.
    ```
    ### Use
    ```typescript
+   import { App, Stack } from 'aws-cdk-lib';
    import { GitHubRunners } from '@cloudsnorkel/cdk-github-runners';
    
-   new GitHubRunners(this, "runners");
+   const app = new App();
+   const stack = new Stack(app, 'github-runners');
+   new GitHubRunners(stack, 'runners');
+   
+   app.synth();
    ```
    </details>
    <details><summary>Java</summary>
@@ -96,9 +106,19 @@ You can also create your own provider by implementing `IRunnerProvider`.
    ```
    ### Use
    ```java
+   import software.amazon.awscdk.App;
+   import software.amazon.awscdk.Stack;
    import com.cloudsnorkel.cdk.github.runners.GitHubRunners;
    
-   GitHubRunners.Builder.create(this, "runners").build();
+   public class Example {
+     public static void main(String[] args){
+       App app = new App();
+       Stack stack = new Stack(app, "github-runners");
+       GitHubRunners.Builder.create(stack, "runners").build();
+   
+       app.synth();
+     }
+   } 
    ```
    </details>
    <details><summary>Go</summary>
@@ -110,9 +130,21 @@ You can also create your own provider by implementing `IRunnerProvider`.
    ```
    ### Use
    ```go
-   import "github.com/CloudSnorkel/cdk-github-runners-go/cloudsnorkelcdkgithubrunners"
+   package main
+
+   import (
+     "github.com/CloudSnorkel/cdk-github-runners-go/cloudsnorkelcdkgithubrunners"
+     "github.com/aws/aws-cdk-go/awscdk/v2"
+     "github.com/aws/jsii-runtime-go"
+   )
    
-   NewGitHubRunners(this, jsii.String("runners"))
+   func main() {
+     app := awscdk.NewApp(nil)
+     stack := awscdk.NewStack(app, jsii.String("github-runners"), &awscdk.StackProps{})
+     cloudsnorkelcdkgithubrunners.NewGitHubRunners(stack, jsii.String("runners"), &cloudsnorkelcdkgithubrunners.GitHubRunnersProps{})
+   
+     app.Synth(nil)
+   }
    ```
    </details>
    <details><summary>.NET</summary>
@@ -124,9 +156,22 @@ You can also create your own provider by implementing `IRunnerProvider`.
    ```
    ### Use
    ```csharp
+   using Amazon.CDK;
    using CloudSnorkel;
    
-   new GitHubRunners(this, "runners");
+   namespace Example
+   {
+     sealed class Program
+     {
+       public static void Main(string[] args)
+       {
+         var app = new App();
+         var stack = new Stack(app, "github-runners");
+         new GitHubRunners(stack, "runners");
+         app.Synth();
+       }
+     }
+   }
    ```
    </details>
 2. Use `GitHubRunners` construct in your code (starting with default arguments is fine)
@@ -179,19 +224,13 @@ new GitHubRunners(this, 'runners', {
 Another way to customize runners is by modifying the image used to spin them up. The image contains the [runner][5], any required dependencies, and integration code with the provider. You may choose to customize this image by adding more packages, for example.
 
 ```typescript
-const myBuilder = CodeBuildRunnerProvider.imageBuilder(this, 'image builder', {
-   dockerfilePath: FargateRunner.LINUX_X64_DOCKERFILE_PATH,
-   runnerVersion: RunnerVersion.specific('2.291.0'),
-   rebuildInterval: Duration.days(14),
-});
+const myBuilder = FargateRunnerProvider.imageBuilder(this, 'image builder');
 myBuilder.addComponent(
-  RunnerImageComponent.custom({ commands: ['apt install -y nginx xz-utils'] })
+  RunnerImageComponent.custom({ commands: ['apt install -y nginx xz-utils'] }),
 );
 
 const myProvider = new FargateRunnerProvider(this, 'fargate runner', {
    labels: ['customized-fargate'],
-   vpc: vpc,
-   securityGroups: [runnerSg],
    imageBuilder: myBuilder,
 });
 
@@ -219,25 +258,21 @@ Windows images can also be customized the same way.
 const myWindowsBuilder = FargateRunnerProvider.imageBuilder(this, 'Windows image builder', {
    architecture: Architecture.X86_64,
    os: Os.WINDOWS,
-   runnerVersion: RunnerVersion.specific('2.291.0'),
-   rebuildInterval: Duration.days(14),
 });
 myWindowsBuilder.addComponent(
-        RunnerImageComponent.custom({
-           name: 'Ninja',
-           commands: [
-              'Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-win.zip" -OutFile ninja.zip',
-              'Expand-Archive ninja.zip -DestinationPath C:\\actions',
-              'del ninja.zip',
-           ],
-        })
+   RunnerImageComponent.custom({
+     name: 'Ninja',
+     commands: [
+       'Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-win.zip" -OutFile ninja.zip',
+       'Expand-Archive ninja.zip -DestinationPath C:\\actions',
+       'del ninja.zip',
+     ],
+   }),
 );
 
 const myProvider = new FargateRunnerProvider(this, 'fargate runner', {
    labels: ['customized-windows-fargate'],
-   vpc: vpc,
-   securityGroups: [runnerSg],
-   imageBuidler: myWindowsBuilder,
+   imageBuilder: myWindowsBuilder,
 });
 
 new GitHubRunners(this, 'runners', {
@@ -252,7 +287,7 @@ new GitHubRunners(this, 'runners', {
    providers: [
       new FargateRunnerProvider(this, 'fargate runner', {
          labels: ['arm64', 'fargate'],
-         imageBuidler: FargateRunnerProvider.imageBuilder(this, 'image builder', {
+         imageBuilder: FargateRunnerProvider.imageBuilder(this, 'image builder', {
             architecture: Architecture.ARM64,
             os: Os.LINUX_UBUNTU,
          }),
@@ -280,6 +315,16 @@ Runners are started in response to a webhook coming in from GitHub. If there are
    2. If you see too many errors, make sure you're only sending `workflow_job` events
 5. When using GitHub app, make sure there are active installations in `github.auth.app.installations`
 
+All logs are saved in CloudWatch.
+* Log group names can be found in `status.json` for each provider, image builder, and other parts of the system
+* Some useful Logs Insights queries can be enabled with `GitHubRunners.createLogsInsightsQueries()`
+
+To get `status.json`, check out the CloudFormation stack output for a command that generates it. The command looks like:
+
+```
+aws --region us-east-1 lambda invoke --function-name status-XYZ123 status.json
+```
+
 ## Monitoring
 
 There are two important ways to monitor your runners:
@@ -291,6 +336,18 @@ Other useful metrics to track:
 
 1. Use `GitHubRunners.metricJobCompleted()` to get a metric for the number of completed jobs broken down by labels and job success.
 2. Use `GitHubRunners.metricTime()` to get a metric for the total time a runner is running. This includes the overhead of starting the runner.
+
+## Contributing
+
+If you use and love this project, please consider contributing.
+
+1. 🪳 If you see something, say something. [Issues][16] help improve the quality of the project.
+   * Include relevant logs and package versions for bugs.
+   * When possible, describe the use-case behind feature requests.
+1. 🛠️ [Pull requests][17] are welcome.
+   * Run `npm run build` before submitting to make sure all tests pass.
+   * Allow edits from maintainers so small adjustments can be made easily.
+1. 💵 Consider [sponsoring][15] the project to show your support and optionally get your name listed below.
 
 ## Other Options
 
@@ -312,3 +369,6 @@ Other useful metrics to track:
 [12]: https://www.nuget.org/packages/CloudSnorkel.Cdk.Github.Runners/
 [13]: https://constructs.dev/packages/@cloudsnorkel/cdk-github-runners/
 [14]: https://docs.github.com/en/actions/hosting-your-own-runners/autoscaling-with-self-hosted-runners#using-ephemeral-runners-for-autoscaling
+[15]: https://github.com/sponsors/CloudSnorkel
+[16]: https://github.com/CloudSnorkel/cdk-github-runners/issues
+[17]: https://github.com/CloudSnorkel/cdk-github-runners/pulls

@@ -1,7 +1,7 @@
+import { DescribeExecutionCommand, SFNClient, StopExecutionCommand } from '@aws-sdk/client-sfn';
 import { Octokit } from '@octokit/rest';
 import * as AWSLambda from 'aws-lambda';
-import * as AWS from 'aws-sdk';
-import { getOctokit, getRunner } from './lambda-github';
+import { deleteRunner, getOctokit, getRunner } from './lambda-github';
 
 interface IdleReaperLambdaInput {
   readonly executionArn: string;
@@ -12,38 +12,49 @@ interface IdleReaperLambdaInput {
   readonly maxIdleSeconds: number;
 }
 
-const sfn = new AWS.StepFunctions();
+const sfn = new SFNClient();
 
-exports.handler = async function (event: AWSLambda.SQSEvent): Promise<AWSLambda.SQSBatchResponse> {
+export async function handler(event: AWSLambda.SQSEvent): Promise<AWSLambda.SQSBatchResponse> {
   const result: AWSLambda.SQSBatchResponse = { batchItemFailures: [] };
-  const octokitCache: { [key: number]: Octokit } = {};
+  let octokitCache: Octokit | undefined;
+  let runnerLevel: 'repo' | 'org' | undefined;
 
   for (const record of event.Records) {
     const input = JSON.parse(record.body) as IdleReaperLambdaInput;
-    console.log(`Checking runner for ${input.owner}/${input.repo} [execution-id=${input.runnerName}]`);
+    console.log({
+      notice: 'Checking runner',
+      input,
+    });
 
     const retryLater = () => result.batchItemFailures.push({ itemIdentifier: record.messageId });
 
     // check if step function is still running
-    const execution = await sfn.describeExecution({ executionArn: input.executionArn }).promise();
+    const execution = await sfn.send(new DescribeExecutionCommand({ executionArn: input.executionArn }));
     if (execution.status != 'RUNNING') {
       // no need to test again as runner already finished
-      console.log('Runner already finished');
+      console.log({
+        notice: 'Runner already finished',
+        input,
+      });
       continue;
     }
 
     // get github access
-    let octokit: Octokit;
-    if (octokitCache[input.installationId ?? -1]) {
-      octokit = octokitCache[input.installationId ?? -1];
-    } else {
-      octokit = octokitCache[input.installationId ?? -1] = (await getOctokit(input.installationId)).octokit;
+    if (!octokitCache) {
+      // getOctokit calls secrets manager every time, so cache the result
+      const { octokit, githubSecrets } = await getOctokit(input.installationId);
+      // TODO if installationId changes during normal operations, we may have some records with good installationId, and some with bad
+      octokitCache = octokit;
+      runnerLevel = githubSecrets.runnerLevel;
     }
 
     // find runner
-    const runner = await getRunner(octokit, input.owner, input.repo, input.runnerName);
+    const runner = await getRunner(octokitCache, runnerLevel, input.owner, input.repo, input.runnerName);
     if (!runner) {
-      console.error(`Runner not running yet for ${input.owner}/${input.repo}:${input.runnerName}`);
+      console.log({
+        notice: 'Runner not running yet',
+        input,
+      });
       retryLater();
       continue;
     }
@@ -52,7 +63,10 @@ exports.handler = async function (event: AWSLambda.SQSEvent): Promise<AWSLambda.
     // we want to try again because the runner might be retried due to e.g. lambda timeout
     // we need to keep following the retry too and make sure it doesn't go idle
     if (runner.busy) {
-      console.log('Runner is not idle');
+      console.log({
+        notice: 'Runner is not idle',
+        input,
+      });
       retryLater();
       continue;
     }
@@ -66,36 +80,50 @@ exports.handler = async function (event: AWSLambda.SQSEvent): Promise<AWSLambda.
         const now = new Date();
         const diffMs = now.getTime() - startedDate.getTime();
 
-        console.log(`Runner ${input.runnerName} started ${diffMs/1000} seconds ago`);
+        console.log({
+          notice: `Runner ${input.runnerName} started ${diffMs / 1000} seconds ago`,
+          input,
+        });
 
         if (diffMs > 1000 * input.maxIdleSeconds) {
           // max idle time reached, delete runner
-          console.log(`Runner ${input.runnerName} is idle for too long`);
+          console.log({
+            notice: `Runner ${input.runnerName} is idle for too long`,
+            input,
+          });
 
           try {
             // stop step function first, so it's marked as aborted with the proper error
             // if we delete the runner first, the step function will be marked as failed with a generic error
-            console.log(`Stopping step function ${input.executionArn}...`);
-            await sfn.stopExecution({
+            console.log({
+              notice: `Stopping step function ${input.executionArn}...`,
+              input,
+            });
+            await sfn.send(new StopExecutionCommand({
               executionArn: input.executionArn,
               error: 'IdleRunner',
               cause: `Runner ${input.runnerName} on ${input.owner}/${input.repo} is idle for too long (${diffMs / 1000} seconds and limit is ${input.maxIdleSeconds} seconds)`,
-            }).promise();
+            }));
           } catch (e) {
-            console.error(`Failed to stop step function ${input.executionArn}: ${e}`);
+            console.error({
+              notice: `Failed to stop step function ${input.executionArn}: ${e}`,
+              input,
+            });
             retryLater();
             continue;
           }
 
           try {
-            console.log(`Deleting runner ${runner.id}...`);
-            await octokit.rest.actions.deleteSelfHostedRunnerFromRepo({
-              owner: input.owner,
-              repo: input.repo,
-              runner_id: runner.id,
+            console.log({
+              notice: `Deleting runner ${runner.id}...`,
+              input,
             });
+            await deleteRunner(octokitCache, runnerLevel, input.owner, input.repo, runner.id);
           } catch (e) {
-            console.error(`Failed to delete runner ${runner.id}: ${e}`);
+            console.error({
+              notice: `Failed to delete runner ${runner.id}: ${e}`,
+              input,
+            });
             retryLater();
             continue;
           }
@@ -111,10 +139,13 @@ exports.handler = async function (event: AWSLambda.SQSEvent): Promise<AWSLambda.
 
     if (!found) {
       // no started label? retry later (it won't retry forever as eventually the runner will stop and the step function will finish)
-      console.error('No `cdkghr:started:xxx` label found???');
+      console.error({
+        notice: 'No `cdkghr:started:xxx` label found???',
+        input,
+      });
       retryLater();
     }
   }
 
   return result;
-};
+}
